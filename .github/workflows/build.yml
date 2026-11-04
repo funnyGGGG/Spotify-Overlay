@@ -1,0 +1,36 @@
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version and repository
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          $c = Get-Content src/Config.cs -Raw
+          $c = $c -replace 'Version = "[0-9.]+"', ('Version = "' + $v + '"')
+          Set-Content src/Config.cs $c
+          Set-Content assets/repo.txt "${{ github.repository }}"
+
+      - name: Build
+        shell: cmd
+        run: |
+          mkdir build
+          set CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe
+          set REFS=/r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:Microsoft.CSharp.dll
+          "%CSC%" /nologo /target:winexe /optimize+ /codepage:65001 /win32icon:assets\SpotifyOverlay.ico /resource:assets\cover.png,cover.png /resource:assets\repo.txt,repo.txt %REFS% /out:build\SpotifyOverlay.exe src\Overlay.cs src\Settings.cs src\Lang.cs src\Config.cs src\UI.cs src\Audio.cs src\Discord.cs src\Updater.cs src\HotKeys.cs
+          "%CSC%" /nologo /target:winexe /optimize+ /codepage:65001 /win32icon:assets\SpotifyOverlay.ico /resource:build\SpotifyOverlay.exe,payload.exe /resource:assets\cover.png,cover.png %REFS% /out:build\SpotifyOverlay_Setup.exe installer\Setup.cs src\Lang.cs src\Config.cs src\UI.cs
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/SpotifyOverlay_Setup.exe
