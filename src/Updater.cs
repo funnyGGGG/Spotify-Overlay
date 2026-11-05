@@ -3,7 +3,14 @@ using System;
 using System.IO;
 using System.Net;
 using System.Reflection;
-using System.Text.RegularExpressions;
+using System.Collections.Generic;
+
+class UpdateInfo
+{
+    public Version Ver;
+    public string Url;
+    public string Notes;
+}
 
 // Sucht neue Versionen in den GitHub-Releases
 static class Updater
@@ -40,10 +47,9 @@ static class Updater
         get { return new Version(App.Version); }
     }
 
-    public static bool Latest(out Version ver, out string url)
+    public static bool Latest(out UpdateInfo info)
     {
-        ver = null;
-        url = null;
+        info = null;
         if (!Configured) return false;
 
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;   // TLS 1.2
@@ -55,23 +61,25 @@ static class Updater
         using (StreamReader sr = new StreamReader(rs.GetResponseStream()))
             json = sr.ReadToEnd();
 
-        Match tag = Regex.Match(json, "\"tag_name\"\\s*:\\s*\"v?([0-9.]+)\"");
-        Match file = Regex.Match(json, "\"browser_download_url\"\\s*:\\s*\"([^\"]+Setup\\.exe)\"");
-        if (!tag.Success || !file.Success) return false;
-        ver = new Version(tag.Groups[1].Value);
-        url = file.Groups[1].Value;
+        object rel = Json.Parse(json);
+        string tag = Json.Str(rel, "tag_name").TrimStart('v', 'V');
+        string url = null;
+        List<object> assets = Json.Get(rel, "assets") as List<object>;
+        if (assets != null)
+            foreach (object a in assets)
+                if (Json.Str(a, "name").EndsWith("Setup.exe", StringComparison.OrdinalIgnoreCase))
+                    url = Json.Str(a, "browser_download_url");
+        if (url == null || tag.Length == 0) return false;
+
+        info = new UpdateInfo();
+        info.Ver = new Version(tag);
+        info.Url = url;
+        info.Notes = Json.Str(rel, "body");
         return true;
     }
 
-    public static string Download(string url)
+    public static string TempFile()
     {
-        ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
-        string path = Path.Combine(Path.GetTempPath(), "SpotifyOverlay_Update.exe");
-        using (WebClient wc = new WebClient())
-        {
-            wc.Headers[HttpRequestHeader.UserAgent] = "SpotifyOverlay";
-            wc.DownloadFile(url, path);
-        }
-        return path;
+        return Path.Combine(Path.GetTempPath(), "SpotifyOverlay_Update.exe");
     }
 }

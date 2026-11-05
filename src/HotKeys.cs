@@ -22,26 +22,36 @@ static class HotKeys
             if (p[i] == "Alt") mods |= 1;
             else if (p[i] == "Ctrl") mods |= 2;
             else if (p[i] == "Shift") mods |= 4;
+            else if (p[i] == "Win") mods |= 8;
         }
         try { vk = (uint)(Keys)Enum.Parse(typeof(Keys), p[p.Length - 1]); }
         catch { return false; }
         return vk != 0;
     }
 
+    // Fehler beim Anmelden eines Kuerzels duerfen das Programm nie beenden
     public static void Apply(IntPtr handle)
     {
-        for (int i = 0; i < Config.Hk.Length; i++)
+        try
         {
-            UnregisterHotKey(handle, i + 1);
-            uint mods, vk;
-            if (!Parse(Config.Hk[i], out mods, out vk)) continue;
-            if (i >= 2) mods |= 0x4000;   // nur Lauter/Leiser duerfen sich wiederholen
-            RegisterHotKey(handle, i + 1, mods, vk);
+            for (int i = 0; i < Config.Hk.Length; i++)
+            {
+                UnregisterHotKey(handle, i + 1);
+                uint mods, vk;
+                if (!Parse(Config.Hk[i], out mods, out vk)) continue;
+                if (i >= 2) mods |= 0x4000;   // nur Lauter/Leiser duerfen sich wiederholen
+                RegisterHotKey(handle, i + 1, mods, vk);
+            }
         }
+        catch { }
     }
 
     public static void Remove(IntPtr handle)
     {
-        for (int i = 0; i < Config.Hk.Length; i++) UnregisterHotKey(handle, i + 1);
+        try
+        {
+            for (int i = 0; i < Config.Hk.Length; i++) UnregisterHotKey(handle, i + 1);
+        }
+        catch { }
     }
 }

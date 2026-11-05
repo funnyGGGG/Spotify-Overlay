@@ -2,6 +2,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 // Flacher Button im dunklen Stil
@@ -50,9 +51,12 @@ class Bar : Control
     }
 }
 
-// Feld, in das man ein Tastenkuerzel eintippt (z.B. Strg+Alt+Hoch)
+// Feld, in das man ein Tastenkuerzel eintippt (jede Taste, mit oder ohne Strg/Alt/Umschalt/Win)
 class KeyBox : TextBox
 {
+    [DllImport("user32.dll")]
+    static extern short GetAsyncKeyState(int vk);
+
     public KeyBox()
     {
         ReadOnly = true;
@@ -64,21 +68,21 @@ class KeyBox : TextBox
 
     protected override bool IsInputKey(Keys keyData) { return true; }
 
-    protected override void OnKeyDown(KeyEventArgs e)
+    // ProcessCmdKey bekommt wirklich alle Tasten, auch F10, Alt+... und die Medientasten
+    protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        e.Handled = true;
-        e.SuppressKeyPress = true;
-        Keys k = e.KeyCode;
-        if (k == Keys.Back || k == Keys.Delete) { Text = ""; return; }
-        if (k == Keys.ControlKey || k == Keys.ShiftKey || k == Keys.Menu || k == Keys.LWin || k == Keys.RWin) return;
-
-        bool fkey = k >= Keys.F1 && k <= Keys.F24;
-        if (!e.Control && !e.Alt && !e.Shift && !fkey) return;   // ohne Modifier sonst Tastatur blockiert
+        Keys k = keyData & Keys.KeyCode;
+        if (k == Keys.Back || k == Keys.Delete) { Text = ""; return true; }
+        if (k == Keys.ControlKey || k == Keys.ShiftKey || k == Keys.Menu || k == Keys.LWin || k == Keys.RWin) return true;
+        if (k == Keys.None) return true;
 
         string s = "";
-        if (e.Control) s += "Ctrl+";
-        if (e.Alt) s += "Alt+";
-        if (e.Shift) s += "Shift+";
+        bool win = (GetAsyncKeyState(0x5B) & 0x8000) != 0 || (GetAsyncKeyState(0x5C) & 0x8000) != 0;
+        if (win) s += "Win+";
+        if ((keyData & Keys.Control) != 0) s += "Ctrl+";
+        if ((keyData & Keys.Alt) != 0) s += "Alt+";
+        if ((keyData & Keys.Shift) != 0) s += "Shift+";
         Text = s + k.ToString();
+        return true;
     }
 }

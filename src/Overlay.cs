@@ -4,14 +4,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
 using System.Drawing.Text;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 // Unsichtbares Mini-Fenster: gibt dem Overlay einen Button in der Taskleiste
@@ -43,11 +41,24 @@ class TaskbarHost : Form
         Location = new Point(0, 0);
         Size = new Size(1, 1);
         Opacity = 0;
-        Activated += delegate { if ((DateTime.Now - born).TotalSeconds > 2) ov.TaskbarClick(); };
+        // Nur ein Klick auf die Taskleiste blendet das Overlay um. Alt+Tab aktiviert dieses Fenster
+        // ebenfalls, das darf das Overlay NICHT verstecken.
+        Activated += delegate { if ((DateTime.Now - born).TotalSeconds > 2 && FromTaskbar()) ov.TaskbarClick(); };
         SizeChanged += delegate
         {
-            if (WindowState == FormWindowState.Minimized) { WindowState = FormWindowState.Normal; ov.TaskbarClick(); }
+            if (WindowState == FormWindowState.Minimized)
+            {
+                WindowState = FormWindowState.Normal;
+                if (FromTaskbar()) ov.TaskbarClick();
+            }
         };
+    }
+
+    static bool FromTaskbar()
+    {
+        Point p = Cursor.Position;
+        Screen sc = Screen.FromPoint(p);
+        return sc.Bounds.Contains(p) && !sc.WorkingArea.Contains(p);
     }
 
     protected override CreateParams CreateParams
@@ -127,27 +138,39 @@ class Overlay : Form
     static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
 
     const byte VK_NEXT = 0xB0, VK_PREV = 0xB1, VK_PLAY = 0xB3;
-    const float BaseW = 336f;
+    const float BaseW = 352f;
     static readonly int[] BtnX = { 228, 252, 276 };
+    static readonly string[] AdWords = { "advertisement", "werbung", "anuncio", "publicidad", "publicité", "publicite", "pubblicità", "pubblicita", "reclame" };
     static readonly Color BG = Color.FromArgb(24, 24, 24);
     static readonly Color GREEN = Color.FromArgb(29, 185, 84);
     static readonly Color ACC = Color.FromArgb(232, 120, 40);
 
+    // Fenster und Helfer
     NotifyIcon tray;
     TaskbarHost host;
     SettingsForm settings;
+    PlaylistForm playlists;
+    UpdateForm updateWin;
     Icon appIcon;
     Image cover;
+    Bitmap coverScaled;
+    Font fTitle, fSub, fTiny;
     DiscordRpc rpc = new DiscordRpc();
     System.Windows.Forms.Timer hideTimer;
     DateTime lastToggle = DateTime.MinValue;
     public bool Exiting = false;
 
-    // Song-Zustand
-    string trackTitle = "", trackArtist = "", lastSong = "";
-    bool running = false, hasSong = false, playing = false;
+    // Werte, die der Hintergrund-Thread liefert
+    readonly object stateLock = new object();
+    string wFound = null;
+    bool wRunning = false, wAd = false;
+    float wVol = -1f;
+
+    // Zustand
+    string trackTitle = "", trackArtist = "", lastKey = "", adInfo = "";
+    bool running = false, hasSong = false, playing = false, isAd = false;
     double posSec = 0, durSec = 0;
-    DateTime lastPoll = DateTime.Now;
+    DateTime lastTick = DateTime.Now;
     bool syncing = false;
     int tick = 0;
     float vol = -1f;
@@ -155,11 +178,12 @@ class Overlay : Form
     // Fenster / Maus
     float scale = 1f;
     int hoverBtn = -1, pressedBtn = -1;
-    bool dragging = false, resizing = false, volDrag = false;
+    bool dragging = false, resizing = false, volDrag = false, seeking = false;
     Point dragOffset;
     int resizeStartX;
     float resizeStartScale;
-    DateTime lastVolSet = DateTime.MinValue;
+    float pendingVol = 0f;
+    AutoResetEvent volEvent = new AutoResetEvent(false);
 
     float BaseH { get { return Config.Volume ? 86f : 68f; } }
 
@@ -179,6 +203,12 @@ class Overlay : Form
     {
         keybd_event(vk, 0, 0, UIntPtr.Zero);
         keybd_event(vk, 0, 2, UIntPtr.Zero);
+    }
+
+    // Befehl nur an Spotify schicken (nicht an YouTube & Co). Medientaste nur, wenn die Windows-Funktion fehlt.
+    void Cmd(string name, byte vk)
+    {
+        ThreadPool.QueueUserWorkItem(delegate { if (Media.Command(name) == 2) Key(vk); });
     }
 
     // ---------- Bilder ----------
@@ -219,93 +249,37 @@ class Overlay : Form
         }
         catch { }
         Bitmap bmp = new Bitmap(64, 64);
-        using (Graphics g = Graphics.FromImage(bmp))
-            g.Clear(GREEN);
+        using (Graphics g = Graphics.FromImage(bmp)) g.Clear(GREEN);
         return bmp;
     }
 
-    // ---------- Cover und Laufzeit ueber die Windows-Mediensteuerung ----------
-    static object Await(Type ext, object op, Type resultType)
+    // Bild in der aktuellen Groesse vorbereiten, damit das Zeichnen schnell bleibt
+    void RebuildCover()
     {
-        MethodInfo m = null;
-        foreach (MethodInfo mi in ext.GetMethods())
+        int sz = Math.Max(8, (int)(38 * scale));
+        Bitmap b = new Bitmap(sz, sz);
+        using (Graphics g = Graphics.FromImage(b))
         {
-            if (mi.Name == "AsTask" && mi.IsGenericMethodDefinition && mi.GetParameters().Length == 1
-                && mi.GetParameters()[0].ParameterType.Name.StartsWith("IAsyncOperation`1"))
-                m = mi;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.DrawImage(cover, 0, 0, sz, sz);
         }
-        Task t = (Task)m.MakeGenericMethod(resultType).Invoke(null, new object[] { op });
-        t.Wait(4000);
-        return ((dynamic)t).Result;
+        Bitmap old = coverScaled;
+        coverScaled = b;
+        if (old != null) old.Dispose();
     }
 
-    static object SpotifySession(Type ext, Type mgrT)
+    void MakeFonts()
     {
-        dynamic mgr = Await(ext, mgrT.GetMethod("RequestAsync").Invoke(null, null), mgrT);
-        foreach (dynamic s in mgr.GetSessions())
-        {
-            string id = ((string)s.SourceAppUserModelId).ToLower();
-            if (id.Contains("spotify")) return s;
-        }
-        return null;
+        Font a = fTitle, b = fSub, c = fTiny;
+        fTitle = new Font("Segoe UI", 14f * scale, FontStyle.Bold, GraphicsUnit.Pixel);
+        fSub = new Font("Segoe UI", 11.5f * scale, FontStyle.Regular, GraphicsUnit.Pixel);
+        fTiny = new Font("Segoe UI", 10f * scale, FontStyle.Regular, GraphicsUnit.Pixel);
+        if (a != null) a.Dispose();
+        if (b != null) b.Dispose();
+        if (c != null) c.Dispose();
     }
 
-    static Assembly rtAsm;
-    static Type ExtType()
-    {
-        if (rtAsm == null)
-            rtAsm = Assembly.Load("System.Runtime.WindowsRuntime, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089");
-        return rtAsm.GetType("System.WindowsRuntimeSystemExtensions");
-    }
-
-    static Type MgrType()
-    {
-        return Type.GetType("Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime");
-    }
-
-    static Image GetCover()
-    {
-        Type ext = ExtType();
-        Type propT = Type.GetType("Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties, Windows.Media.Control, ContentType=WindowsRuntime");
-        Type strT = Type.GetType("Windows.Storage.Streams.IRandomAccessStreamWithContentType, Windows.Storage.Streams, ContentType=WindowsRuntime");
-        Type streamExt = rtAsm.GetType("System.IO.WindowsRuntimeStreamExtensions");
-
-        dynamic s = SpotifySession(ext, MgrType());
-        if (s == null) return null;
-        dynamic props = Await(ext, s.TryGetMediaPropertiesAsync(), propT);
-        dynamic thumb = props.Thumbnail;
-        if (thumb == null) return null;
-        object stream = Await(ext, thumb.OpenReadAsync(), strT);
-        MethodInfo asRead = null;
-        foreach (MethodInfo mi in streamExt.GetMethods())
-            if (mi.Name == "AsStreamForRead" && mi.GetParameters().Length == 1) asRead = mi;
-        Stream net = (Stream)asRead.Invoke(null, new object[] { stream });
-        MemoryStream ms = new MemoryStream();
-        net.CopyTo(ms);
-        ms.Position = 0;
-        return Image.FromStream(ms);
-    }
-
-    static bool GetTimeline(bool isPlaying, out double pos, out double dur)
-    {
-        pos = 0; dur = 0;
-        dynamic s = SpotifySession(ExtType(), MgrType());
-        if (s == null) return false;
-        dynamic tl = s.GetTimelineProperties();
-        TimeSpan st = tl.StartTime, en = tl.EndTime, ps = tl.Position;
-        dur = (en - st).TotalSeconds;
-        pos = (ps - st).TotalSeconds;
-        if (isPlaying)
-        {
-            DateTimeOffset lu = tl.LastUpdatedTime;
-            double extra = (DateTimeOffset.Now - lu).TotalSeconds;
-            if (extra > 0 && extra < 7200) pos += extra;
-        }
-        if (pos < 0) pos = 0;
-        if (pos > dur) pos = dur;
-        return dur > 1;
-    }
-
+    // ---------- Hintergrund: Zeitleiste und Cover ----------
     void SyncTimeline()
     {
         if (syncing) return;
@@ -313,7 +287,7 @@ class Overlay : Form
         try
         {
             double p, d;
-            if (GetTimeline(playing, out p, out d)) { posSec = p; durSec = d; }
+            if (Media.GetTimeline(playing, out p, out d) && !seeking) { posSec = p; durSec = d; }
         }
         catch { }
         syncing = false;
@@ -325,19 +299,82 @@ class Overlay : Form
         Thread.Sleep(1200);
         SyncTimeline();
         Image img = null;
-        try { img = GetCover(); } catch { }
+        string mt = "", ma = "";
+        try { Media.GetMeta(out mt, out ma, out img); } catch { }
         if (img == null) img = Fallback();
         Image rounded = Round(img, 112);
+        bool ad = isAd;
         try
         {
             BeginInvoke(new Action(delegate
             {
                 cover = rounded;
+                RebuildCover();
+                if (ad)
+                {
+                    List<string> parts = new List<string>();
+                    if (mt.Length > 0 && Array.IndexOf(AdWords, mt.Trim().ToLower()) < 0) parts.Add(mt);
+                    if (ma.Length > 0 && ma != "Spotify") parts.Add(ma);
+                    adInfo = string.Join(" · ", parts.ToArray());
+                }
                 Invalidate();
                 if (host != null) host.RefreshThumb();
             }));
         }
         catch { }
+    }
+
+    // Laeuft im Hintergrund, damit die Oberflaeche nie ruckelt
+    void WorkerLoop()
+    {
+        int n = 0;
+        while (!Exiting)
+        {
+            try
+            {
+                HashSet<int> pids = new HashSet<int>();
+                foreach (Process p in Process.GetProcessesByName("Spotify")) { pids.Add(p.Id); p.Dispose(); }
+                bool r = pids.Count > 0;
+                string found = null;
+                bool ad = false;
+                if (r)
+                {
+                    EnumWindows(delegate(IntPtr h, IntPtr l)
+                    {
+                        int pid; GetWindowThreadProcessId(h, out pid);
+                        if (!pids.Contains(pid)) return true;
+                        StringBuilder sb = new StringBuilder(256);
+                        GetWindowText(h, sb, 256);
+                        string t = sb.ToString();
+                        if (Array.IndexOf(AdWords, t.Trim().ToLower()) >= 0) { ad = true; return true; }
+                        if (t.Contains(" - ")) { found = t; return false; }
+                        return true;
+                    }, IntPtr.Zero);
+                }
+                float v = -1f;
+                if (Config.Volume && !volDrag && n % 2 == 0) v = SpotifyAudio.Get();
+                lock (stateLock)
+                {
+                    wRunning = r;
+                    wFound = found;
+                    wAd = ad && found == null;
+                    if (Config.Volume && n % 2 == 0 && !volDrag) wVol = v;
+                }
+            }
+            catch { }
+            n++;
+            Thread.Sleep(1000);
+        }
+    }
+
+    void VolumeLoop()
+    {
+        while (!Exiting)
+        {
+            volEvent.WaitOne();
+            if (Exiting) return;
+            SpotifyAudio.Set(pendingVol);
+        }
     }
 
     // ---------- Aufbau ----------
@@ -377,13 +414,15 @@ class Overlay : Form
         BuildMenu();
         tray.Visible = true;
 
+        // Sekundentakt: nur leichte Arbeit (Zeit weiterzaehlen, zeichnen)
         System.Windows.Forms.Timer poll = new System.Windows.Forms.Timer();
         poll.Interval = 1000;
-        poll.Tick += delegate { Poll(); };
+        poll.Tick += delegate { Tick(); };
         poll.Start();
 
+        // Immer ganz oben halten, ohne Fokus
         System.Windows.Forms.Timer top = new System.Windows.Forms.Timer();
-        top.Interval = 5000;
+        top.Interval = 2000;
         top.Tick += delegate { if (Visible) SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0013); };
         top.Start();
 
@@ -393,8 +432,14 @@ class Overlay : Form
         upd.Tick += delegate { upd.Interval = 6 * 3600 * 1000; StartUpdateCheck(false); };
         upd.Start();
 
+        Thread w = new Thread(WorkerLoop);
+        w.IsBackground = true;
+        w.Start();
+        Thread vt = new Thread(VolumeLoop);
+        vt.IsBackground = true;
+        vt.Start();
+
         ApplyScale(scale);
-        Poll();
         if (Config.Popup) hideTimer.Start();
     }
 
@@ -402,6 +447,7 @@ class Overlay : Form
     {
         ContextMenuStrip m = new ContextMenuStrip();
         m.Items.Add(Lang.T("tray_toggle"), null, delegate { TaskbarClick(); });
+        m.Items.Add(Lang.T("tray_playlists"), null, delegate { OpenPlaylists(); });
         m.Items.Add(Lang.T("tray_settings"), null, delegate { OpenSettings(); });
         m.Items.Add(Lang.T("tray_update"), null, delegate { StartUpdateCheck(true); });
         m.Items.Add(new ToolStripSeparator());
@@ -414,6 +460,13 @@ class Overlay : Form
         if (settings == null || settings.IsDisposed) settings = new SettingsForm(this);
         settings.Show();
         settings.Activate();
+    }
+
+    void OpenPlaylists()
+    {
+        if (playlists == null || playlists.IsDisposed) playlists = new PlaylistForm();
+        playlists.Show();
+        playlists.Activate();
     }
 
     // Wird von den Einstellungen aufgerufen
@@ -441,19 +494,17 @@ class Overlay : Form
         {
             try
             {
-                Version v; string url;
                 if (!Updater.Configured) { if (manual) Balloon(Lang.T("upd_norepo")); return; }
-                if (!Updater.Latest(out v, out url)) { if (manual) Balloon(Lang.T("upd_fail")); return; }
-                if (v > Updater.Current)
+                UpdateInfo info;
+                if (!Updater.Latest(out info)) { if (manual) Balloon(Lang.T("upd_fail")); return; }
+                if (info.Ver > Updater.Current)
                 {
-                    if (Config.AutoUpdate)
+                    BeginInvoke(new Action(delegate
                     {
-                        Balloon(Lang.T("upd_new", v));
-                        string file = Updater.Download(url);
-                        Process.Start(file, "/silent");
-                        BeginInvoke(new Action(ExitAll));
-                    }
-                    else Balloon(Lang.T("upd_avail", v));
+                        if (updateWin != null && !updateWin.IsDisposed) return;
+                        updateWin = new UpdateForm(this, info, Config.AutoUpdate);
+                        updateWin.Show();
+                    }));
                 }
                 else if (manual) Balloon(Lang.T("upd_none"));
             }
@@ -466,11 +517,13 @@ class Overlay : Form
     // ---------- Zeichnen ----------
     RectangleF BtnRect(int i)
     {
-        if (i == 3) return new RectangleF(304 * scale, 7 * scale, 22 * scale, 22 * scale);
+        if (i == 3) return new RectangleF(300 * scale, 7 * scale, 22 * scale, 22 * scale);
+        if (i == 4) return new RectangleF(326 * scale, 7 * scale, 22 * scale, 22 * scale);
         return new RectangleF(BtnX[i] * scale, 5 * scale, 24 * scale, 24 * scale);
     }
 
     RectangleF VolRect() { return new RectangleF(70 * scale, 63 * scale, 214 * scale, 20 * scale); }
+    RectangleF SeekRect() { return new RectangleF(56 * scale, 50 * scale, 278 * scale, 12 * scale); }
     RectangleF GripRect() { return new RectangleF(Width - 16, Height - 16, 16, 16); }
 
     static void DrawBtn(Graphics g, int kind, RectangleF r, bool hover, bool isPlaying)
@@ -501,6 +554,20 @@ class Overlay : Form
                 g.FillRectangle(br, cx - s * 0.98f, cy - s, s * 0.38f, s * 2);
             }
         }
+    }
+
+    static void DrawList(Graphics g, RectangleF r, bool hover)
+    {
+        Color c = hover ? ACC : Color.FromArgb(200, 200, 200);
+        float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, u = r.Width * 0.09f;
+        using (Pen p = new Pen(c, Math.Max(1.4f, u * 1.1f)))
+        using (SolidBrush b = new SolidBrush(c))
+            for (int i = -1; i <= 1; i++)
+            {
+                float y = cy + i * u * 3.2f;
+                g.FillEllipse(b, cx - u * 4.4f, y - u * 0.9f, u * 1.8f, u * 1.8f);
+                g.DrawLine(p, cx - u * 1.8f, y, cx + u * 4.4f, y);
+            }
     }
 
     static void DrawGear(Graphics g, RectangleF r, bool hover)
@@ -552,23 +619,22 @@ class Overlay : Form
     void Render(Graphics g)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.InterpolationMode = InterpolationMode.HighQualityBilinear;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.Clear(BG);
+        if (fTitle == null) return;
 
         float s = scale;
         string title = trackTitle, artist = trackArtist;
         if (!running) { title = Lang.T("notStarted"); artist = ""; }
+        else if (isAd) { title = Lang.T("ad_title"); artist = adInfo; }
         else if (!hasSong) { title = Lang.T("idle"); artist = ""; }
 
-        g.DrawImage(cover, new RectangleF(8 * s, 8 * s, 38 * s, 38 * s));
+        if (coverScaled != null) g.DrawImage(coverScaled, 8 * s, 8 * s, coverScaled.Width, coverScaled.Height);
         DrawSpotifyLogo(g, 8 * s, 50 * s, 11 * s);
 
         using (StringFormat left = new StringFormat(StringFormatFlags.NoWrap))
         using (StringFormat right = new StringFormat(StringFormatFlags.NoWrap))
-        using (Font fTitle = new Font("Segoe UI", 14f * s, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (Font fSub = new Font("Segoe UI", 11.5f * s, FontStyle.Regular, GraphicsUnit.Pixel))
-        using (Font fTiny = new Font("Segoe UI", 10f * s, FontStyle.Regular, GraphicsUnit.Pixel))
         using (SolidBrush white = new SolidBrush(Color.White))
         using (SolidBrush grey = new SolidBrush(Color.FromArgb(165, 165, 165)))
         {
@@ -576,13 +642,13 @@ class Overlay : Form
             right.Alignment = StringAlignment.Far;
 
             g.DrawString(title, fTitle, white, new RectangleF(56 * s, 6 * s, 168 * s, 20 * s), left);
-            g.DrawString(artist, fSub, grey, new RectangleF(56 * s, 24 * s, 240 * s, 16 * s), left);
+            g.DrawString(artist, fSub, grey, new RectangleF(56 * s, 24 * s, 168 * s, 16 * s), left);
             g.DrawString("Spotify", fTiny, grey, new RectangleF(21 * s, 49 * s, 40 * s, 14 * s), left);
 
             if (durSec > 0)
             {
                 g.DrawString(FormatTime(posSec), fTiny, grey, new RectangleF(56 * s, 40 * s, 60 * s, 14 * s), left);
-                g.DrawString(FormatTime(durSec), fTiny, grey, new RectangleF(262 * s, 40 * s, 60 * s, 14 * s), right);
+                g.DrawString(FormatTime(durSec), fTiny, grey, new RectangleF(274 * s, 40 * s, 60 * s, 14 * s), right);
             }
 
             // Lautstaerke-Regler (nur Spotify)
@@ -598,15 +664,15 @@ class Overlay : Form
                         g.FillRectangle(fill, tx, ty, tw * vol, 3 * s);
                     float kx = tx + tw * vol;
                     g.FillEllipse(white, kx - 4.5f * s, ty + 1.5f * s - 4.5f * s, 9 * s, 9 * s);
-                    g.DrawString(((int)Math.Round(vol * 100)) + "%", fTiny, grey, new RectangleF(286 * s, 65 * s, 36 * s, 14 * s), left);
+                    g.DrawString(((int)Math.Round(vol * 100)) + "%", fTiny, grey, new RectangleF(288 * s, 65 * s, 46 * s, 14 * s), left);
                 }
                 else
-                    g.DrawString("--", fTiny, grey, new RectangleF(286 * s, 65 * s, 36 * s, 14 * s), left);
+                    g.DrawString("--", fTiny, grey, new RectangleF(288 * s, 65 * s, 46 * s, 14 * s), left);
             }
         }
 
-        // Fortschrittsbalken
-        float bx = 56 * s, bw = 266 * s, by = 56 * s, bh = 3 * s;
+        // Fortschrittsbalken (anklickbar zum Vorspulen)
+        float bx = 56 * s, bw = 278 * s, by = 56 * s, bh = 3 * s;
         using (SolidBrush track = new SolidBrush(Color.FromArgb(62, 62, 62)))
             g.FillRectangle(track, bx, by, bw, bh);
         if (durSec > 0)
@@ -614,10 +680,14 @@ class Overlay : Form
             float frac = (float)Math.Max(0, Math.Min(1, posSec / durSec));
             using (SolidBrush fill = new SolidBrush(ACC))
                 g.FillRectangle(fill, bx, by, bw * frac, bh);
+            if (seeking)
+                using (SolidBrush k = new SolidBrush(Color.White))
+                    g.FillEllipse(k, bx + bw * frac - 4 * s, by + bh / 2 - 4 * s, 8 * s, 8 * s);
         }
 
         for (int i = 0; i < 3; i++) DrawBtn(g, i, BtnRect(i), hoverBtn == i, playing);
-        DrawGear(g, BtnRect(3), hoverBtn == 3);
+        DrawList(g, BtnRect(3), hoverBtn == 3);
+        DrawGear(g, BtnRect(4), hoverBtn == 4);
 
         // Anfasser zum Groesse aendern
         using (Pen gp = new Pen(Color.FromArgb(110, 110, 110), 1.3f))
@@ -632,19 +702,24 @@ class Overlay : Form
         Render(e.Graphics);
     }
 
-    // Bild fuer die Vorschau (Taskleiste, Alt+Tab)
+    // Bild fuer die Vorschau (Taskleiste, Alt+Tab).
+    // Das Bild hat genau die verlangte Groesse; das Overlay wird mit richtigem Seitenverhaeltnis
+    // in die Mitte gesetzt, damit Windows es nicht zusammendrueckt.
     public Bitmap Snapshot(int maxW, int maxH)
     {
         Bitmap full = new Bitmap(Math.Max(1, Width), Math.Max(1, Height));
         using (Graphics g = Graphics.FromImage(full)) Render(g);
         if (maxW <= 0 || maxH <= 0) return full;
 
-        float k = Math.Min((float)maxW / full.Width, (float)maxH / full.Height);
-        Bitmap bmp = new Bitmap(Math.Max(1, (int)(full.Width * k)), Math.Max(1, (int)(full.Height * k)));
+        Bitmap bmp = new Bitmap(maxW, maxH);
         using (Graphics g = Graphics.FromImage(bmp))
         {
+            g.Clear(Color.FromArgb(16, 16, 16));
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.DrawImage(full, 0, 0, bmp.Width, bmp.Height);
+            float k = Math.Min((maxW - 8f) / full.Width, (maxH - 8f) / full.Height);
+            if (k < 0.1f) k = 0.1f;
+            float w = full.Width * k, h = full.Height * k;
+            g.DrawImage(full, (maxW - w) / 2f, (maxH - h) / 2f, w, h);
         }
         full.Dispose();
         return bmp;
@@ -653,8 +728,13 @@ class Overlay : Form
     // ---------- Maus ----------
     int HitBtn(Point p)
     {
-        for (int i = 0; i < 4; i++) if (BtnRect(i).Contains(p)) return i;
+        for (int i = 0; i < 5; i++) if (BtnRect(i).Contains(p)) return i;
         return -1;
+    }
+
+    double SeekFrac(int x)
+    {
+        return Math.Max(0, Math.Min(1, (x - 56 * scale) / (278 * scale)));
     }
 
     void SetVolFromX(int x)
@@ -663,11 +743,8 @@ class Overlay : Form
         if (v < 0f) v = 0f;
         if (v > 1f) v = 1f;
         vol = v;
-        if ((DateTime.Now - lastVolSet).TotalMilliseconds > 40)
-        {
-            lastVolSet = DateTime.Now;
-            SpotifyAudio.Set(v);
-        }
+        pendingVol = v;
+        volEvent.Set();   // wird im Hintergrund gesetzt
         Invalidate();
     }
 
@@ -685,6 +762,12 @@ class Overlay : Form
             {
                 volDrag = true;
                 SetVolFromX(e.X);
+            }
+            else if (durSec > 0 && !isAd && SeekRect().Contains(e.Location))
+            {
+                seeking = true;
+                posSec = SeekFrac(e.X) * durSec;
+                Invalidate();
             }
             else
             {
@@ -707,6 +790,7 @@ class Overlay : Form
             ApplyScale((BaseW * resizeStartScale + dx) / BaseW);
         }
         else if (volDrag) SetVolFromX(e.X);
+        else if (seeking) { posSec = SeekFrac(e.X) * durSec; Invalidate(); }
         else if (dragging && e.Button == MouseButtons.Left)
             Location = new Point(Cursor.Position.X - dragOffset.X, Cursor.Position.Y - dragOffset.Y);
         else
@@ -714,7 +798,8 @@ class Overlay : Form
             int h = HitBtn(e.Location);
             if (h != hoverBtn) { hoverBtn = h; Invalidate(); }
             if (GripRect().Contains(e.Location)) Cursor = Cursors.SizeNWSE;
-            else if (h >= 0 || (Config.Volume && vol >= 0 && VolRect().Contains(e.Location))) Cursor = Cursors.Hand;
+            else if (h >= 0 || (Config.Volume && vol >= 0 && VolRect().Contains(e.Location)) || (durSec > 0 && !isAd && SeekRect().Contains(e.Location)))
+                Cursor = Cursors.Hand;
             else Cursor = Cursors.Default;
         }
         base.OnMouseMove(e);
@@ -724,19 +809,28 @@ class Overlay : Form
     {
         if (pressedBtn >= 0 && HitBtn(e.Location) == pressedBtn)
         {
-            if (pressedBtn == 0) Key(VK_PREV);
-            else if (pressedBtn == 1) Key(VK_PLAY);
-            else if (pressedBtn == 2) Key(VK_NEXT);
+            if (pressedBtn == 0) Cmd("prev", VK_PREV);
+            else if (pressedBtn == 1) Cmd("play", VK_PLAY);
+            else if (pressedBtn == 2) Cmd("next", VK_NEXT);
+            else if (pressedBtn == 3) OpenPlaylists();
             else OpenSettings();
         }
         pressedBtn = -1;
+
+        if (seeking)
+        {
+            seeking = false;
+            double target = SeekFrac(e.X) * durSec;
+            posSec = target;
+            ThreadPool.QueueUserWorkItem(delegate { Media.Seek(target); Thread.Sleep(900); SyncTimeline(); });
+        }
         if (resizing || dragging)
         {
             resizing = false;
             dragging = false;
             SavePosition();
         }
-        if (volDrag) { volDrag = false; SpotifyAudio.Set(vol); }
+        volDrag = false;
         base.OnMouseUp(e);
     }
 
@@ -774,21 +868,31 @@ class Overlay : Form
     {
         if (id == 1) ChangeVol(0.05f);
         else if (id == 2) ChangeVol(-0.05f);
-        else if (id == 3) Key(VK_NEXT);
-        else if (id == 4) Key(VK_PREV);
-        else if (id == 5) Key(VK_PLAY);
+        else if (id == 3) Cmd("next", VK_NEXT);
+        else if (id == 4) Cmd("prev", VK_PREV);
+        else if (id == 5) Cmd("play", VK_PLAY);
         else if (id == 6) TaskbarClick();
     }
 
     void ChangeVol(float step)
     {
-        float v = SpotifyAudio.Get();
-        if (v < 0f) return;
-        v = Math.Max(0f, Math.Min(1f, v + step));
-        SpotifyAudio.Set(v);
-        vol = v;
-        Invalidate();
-        if (Config.Popup) ShowPopup();
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            float v = SpotifyAudio.Get();
+            if (v < 0f) return;
+            v = Math.Max(0f, Math.Min(1f, v + step));
+            SpotifyAudio.Set(v);
+            try
+            {
+                BeginInvoke(new Action(delegate
+                {
+                    vol = v;
+                    Invalidate();
+                    if (Config.Popup) ShowPopup();
+                }));
+            }
+            catch { }
+        });
     }
 
     public void TaskbarClick()
@@ -809,6 +913,7 @@ class Overlay : Form
     {
         if (Exiting) return;
         Exiting = true;
+        volEvent.Set();
         SavePosition();
         rpc.Close();
         try { HotKeys.Remove(Handle); } catch { }
@@ -821,9 +926,11 @@ class Overlay : Form
     {
         if (s < 0.6f) s = 0.6f;
         if (s > 2.5f) s = 2.5f;
+        bool changed = Math.Abs(s - scale) > 0.001f || fTitle == null;
         scale = (float)Math.Round(s, 2);
         Size = new Size((int)(BaseW * scale), (int)(BaseH * scale));
         Region = Region.FromHrgn(CreateRoundRectRgn(0, 0, Width + 1, Height + 1, (int)(12 * scale), (int)(12 * scale)));
+        if (changed || coverScaled == null) { MakeFonts(); RebuildCover(); }
         Invalidate();
     }
 
@@ -841,79 +948,88 @@ class Overlay : Form
         base.OnFormClosing(e);
     }
 
-    // ---------- Spotify abfragen (einmal pro Sekunde) ----------
-    void Poll()
+    // ---------- Sekundentakt (leicht) ----------
+    void Tick()
     {
-        string oldT = trackTitle, oldA = trackArtist;
-        bool oldPlaying = playing, oldRunning = running, oldHas = hasSong;
+        string found;
+        bool r, ad;
+        float v;
+        lock (stateLock) { found = wFound; r = wRunning; ad = wAd; v = wVol; }
 
-        HashSet<int> pids = new HashSet<int>();
-        foreach (Process p in Process.GetProcessesByName("Spotify")) { pids.Add(p.Id); p.Dispose(); }
-        running = pids.Count > 0;
+        bool changed = false;
+        if (r != running) { running = r; changed = true; }
 
-        if (!running)
+        if (!r)
         {
-            playing = false;
-            hasSong = false;
-            trackTitle = ""; trackArtist = "";
+            playing = false; hasSong = false; isAd = false;
+            if (trackTitle != "") { trackTitle = ""; trackArtist = ""; changed = true; }
+        }
+        else if (ad)
+        {
+            if (!isAd) changed = true;
+            isAd = true;
+            playing = true;
         }
         else
         {
-            string found = null;
-            EnumWindows(delegate(IntPtr h, IntPtr l)
-            {
-                int pid; GetWindowThreadProcessId(h, out pid);
-                if (!pids.Contains(pid)) return true;
-                StringBuilder sb = new StringBuilder(256);
-                GetWindowText(h, sb, 256);
-                string t = sb.ToString();
-                if (t.Contains(" - ")) { found = t; return false; }
-                return true;
-            }, IntPtr.Zero);
-
+            if (isAd) changed = true;
+            isAd = false;
             if (found != null)
             {
                 int i = found.IndexOf(" - ");
-                trackArtist = found.Substring(0, i);
-                trackTitle = found.Substring(i + 3);
+                string a = found.Substring(0, i), t = found.Substring(i + 3);
+                if (a != trackArtist || t != trackTitle) changed = true;
+                trackArtist = a;
+                trackTitle = t;
+                if (!hasSong) changed = true;
                 hasSong = true;
+                if (!playing) changed = true;
                 playing = true;
             }
-            else playing = false;
+            else
+            {
+                if (playing) changed = true;
+                playing = false;
+            }
         }
 
         DateTime now = DateTime.Now;
-        double dt = (now - lastPoll).TotalSeconds;
-        lastPoll = now;
-        if (playing && durSec > 0) { posSec += dt; if (posSec > durSec) posSec = durSec; Invalidate(); }
-        else if (trackTitle != oldT || trackArtist != oldA || playing != oldPlaying || running != oldRunning || hasSong != oldHas) Invalidate();
+        double dt = (now - lastTick).TotalSeconds;
+        lastTick = now;
+        if (playing && durSec > 0 && !seeking)
+        {
+            posSec += dt;
+            if (posSec > durSec) posSec = durSec;
+            changed = true;
+        }
 
         tick++;
-        if (playing && durSec > 0 && tick % 10 == 0)
+        if (playing && durSec > 0 && tick % 10 == 0 && !seeking)
         {
             Thread ts = new Thread(SyncTimeline);
             ts.IsBackground = true;
             ts.Start();
         }
 
-        if (Config.Volume && !volDrag && tick % 2 == 0)
-        {
-            float v = SpotifyAudio.Get();
-            if (Math.Abs(v - vol) > 0.001f) { vol = v; Invalidate(); }
-        }
+        if (Config.Volume && !volDrag && Math.Abs(v - vol) > 0.001f) { vol = v; changed = true; }
 
-        if (playing && trackTitle != lastSong)
+        string key = isAd ? "ad" : (playing ? trackTitle : lastKey);
+        if (playing && key != lastKey)
         {
-            lastSong = trackTitle;
+            lastKey = key;
             posSec = 0; durSec = 0;
+            adInfo = "";
             if (Config.Popup) ShowPopup();
             if (host != null) host.RefreshThumb();
             Thread t = new Thread(LoadCover);
             t.IsBackground = true;
             t.Start();
+            changed = true;
         }
 
-        rpc.Update(Config.Discord, (Config.DiscordId ?? "").Trim(), trackTitle, trackArtist, playing, posSec, durSec, running && hasSong);
+        if (changed) Invalidate();
+
+        rpc.Update(Config.Discord, (Config.DiscordId ?? "").Trim(), trackTitle, trackArtist, playing && !isAd, posSec, durSec, running && hasSong && !isAd);
     }
 
     [STAThread]

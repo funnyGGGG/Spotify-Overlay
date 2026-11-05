@@ -66,6 +66,7 @@ static class SpotifyAudio
         int GetMute(out bool mute);
     }
 
+    static readonly object gate = new object();
     static List<ISimpleAudioVolume> cache = new List<ISimpleAudioVolume>();
     static DateTime cacheTime = DateTime.MinValue;
 
@@ -108,13 +109,16 @@ static class SpotifyAudio
     {
         try
         {
-            List<ISimpleAudioVolume> l = Sessions();
-            if (l.Count == 0) return -1f;
-            float v;
-            l[0].GetMasterVolume(out v);
-            return v;
+            lock (gate)
+            {
+                List<ISimpleAudioVolume> l = Sessions();
+                if (l.Count == 0) return -1f;
+                float v;
+                l[0].GetMasterVolume(out v);
+                return v;
+            }
         }
-        catch { return -1f; }
+        catch { cache = new List<ISimpleAudioVolume>(); return -1f; }
     }
 
     public static void Set(float v)
@@ -123,10 +127,13 @@ static class SpotifyAudio
         {
             if (v < 0f) v = 0f;
             if (v > 1f) v = 1f;
-            foreach (ISimpleAudioVolume s in Sessions())
+            lock (gate)
             {
-                Guid g = Guid.Empty;
-                s.SetMasterVolume(v, ref g);
+                foreach (ISimpleAudioVolume s in Sessions())
+                {
+                    Guid g = Guid.Empty;
+                    s.SetMasterVolume(v, ref g);
+                }
             }
         }
         catch { }

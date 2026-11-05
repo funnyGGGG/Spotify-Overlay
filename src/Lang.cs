@@ -35,7 +35,36 @@ static class Lang
         A("hk_prev", "Previous song", "Vorheriger Song");
         A("hk_play", "Play / pause", "Play / Pause");
         A("hk_toggle", "Show / hide overlay", "Overlay ein-/ausblenden");
-        A("hk_hint", "Click a box and press the keys. Backspace clears it.", "In ein Feld klicken und die Tasten drücken. Mit Rücktaste löschen.");
+        A("hk_hint", "Click a box and press any key (with or without Ctrl/Alt/Shift/Win). Backspace clears it.", "In ein Feld klicken und eine beliebige Taste drücken (mit oder ohne Strg/Alt/Umschalt/Win). Rücktaste löscht.");
+        // neu in 1.7
+        A("ad_title", "Advertisement", "Werbung");
+        A("tray_playlists", "Playlists", "Playlists");
+        A("set_spid", "Spotify Client ID (for playlists)", "Spotify-Client-ID (für Playlists)");
+        A("set_spid_hint", "Redirect URI for your Spotify app: http://127.0.0.1:8898/callback", "Redirect URI für deine Spotify-App: http://127.0.0.1:8898/callback");
+        A("set_help", "Help / Tutorial", "Hilfe / Anleitung");
+        A("help_title", "Help / Tutorial", "Hilfe / Anleitung");
+        A("help_text", "MOVE: drag the overlay with the mouse.\nRESIZE: drag the small grip in the bottom-right corner.\nBUTTONS: previous / play-pause / next control only Spotify, even if a YouTube video is open.\nSEEK: click or drag on the progress bar.\nVOLUME: the slider changes only Spotify's volume.\nPLAYLISTS: the list button shows your Spotify playlists (needs a Spotify developer app, see below).\nSETTINGS: the gear icon - language, transparency, popup mode, keybinds, Discord, updates.\nTASKBAR: the overlay has its own taskbar button. Click it to show / hide. Right-click it and choose Close to quit. The tray icon menu also has \"Quit completely\".\n\nKEYBINDS: Settings -> Keybinds. Click a box and press the keys. Any key works. Keys without Ctrl/Alt/Shift are taken away from all other programs while the overlay runs, so choose carefully.\n\nDISCORD ACTIVITY\n1. Open discord.com/developers/applications and click New Application.\n2. Copy the Application ID.\n3. Paste it into the settings (Discord application ID).\n4. The Discord desktop app must be running and Display current activity must be on. The status line in the settings shows errors.\n\nPLAYLISTS SETUP\n1. Open developer.spotify.com/dashboard and create an app.\n2. Add this Redirect URI: http://127.0.0.1:8898/callback\n3. Copy the Client ID into the settings (Spotify Client ID).\n4. Click the list button and choose Connect. Playing a playlist needs Spotify open (and may need Premium).\n\nUPDATES: the app checks GitHub for new versions and offers to install them.\nADS: during ads the overlay shows Advertisement and the ad picture if Spotify provides it.", "VERSCHIEBEN: Das Overlay mit der Maus ziehen.\nGRÖSSE: Die kleine Ecke unten rechts ziehen.\nTASTEN: Zurück / Play-Pause / Weiter steuern nur Spotify, auch wenn ein YouTube-Video offen ist.\nVORSPULEN: Auf den Fortschrittsbalken klicken oder ziehen.\nLAUTSTÄRKE: Der Regler ändert nur die Lautstärke von Spotify.\nPLAYLISTS: Der Listen-Button zeigt deine Spotify-Playlists (braucht eine Spotify-Entwickler-App, siehe unten).\nEINSTELLUNGEN: Das Zahnrad - Sprache, Transparenz, Popup-Modus, Tastenkürzel, Discord, Updates.\nTASKLEISTE: Das Overlay hat einen eigenen Button in der Taskleiste. Klick blendet es ein/aus. Rechtsklick und Schließen beendet es. Im Tray-Menü gibt es auch \"Komplett beenden\".\n\nTASTENKÜRZEL: Einstellungen -> Tastenkürzel. In ein Feld klicken und die Tasten drücken. Jede Taste geht. Tasten ohne Strg/Alt/Umschalt werden solange das Overlay läuft allen anderen Programmen weggenommen, wähle also mit Bedacht.\n\nDISCORD-AKTIVITÄT\n1. discord.com/developers/applications öffnen und auf New Application klicken.\n2. Die Application ID kopieren.\n3. In den Einstellungen bei Discord-Anwendungs-ID einfügen.\n4. Die Discord-Desktop-App muss laufen und Aktuelle Aktivität anzeigen muss an sein. Die Statuszeile in den Einstellungen zeigt Fehler.\n\nPLAYLISTS EINRICHTEN\n1. developer.spotify.com/dashboard öffnen und eine App erstellen.\n2. Diese Redirect URI eintragen: http://127.0.0.1:8898/callback\n3. Die Client ID in den Einstellungen bei Spotify-Client-ID einfügen.\n4. Auf den Listen-Button klicken und Verbinden wählen. Zum Abspielen muss Spotify offen sein (und es kann Premium nötig sein).\n\nUPDATES: Die App sucht bei GitHub nach neuen Versionen und bietet die Installation an.\nWERBUNG: Bei Werbung zeigt das Overlay Werbung und das Werbebild, falls Spotify eines liefert.");
+        A("pl_title", "My playlists", "Meine Playlists");
+        A("pl_noid", "Enter your Spotify Client ID in the settings first (gear icon). The help window explains how to get one.", "Trage zuerst deine Spotify-Client-ID in den Einstellungen ein (Zahnrad). Das Hilfe-Fenster erklärt, wie du sie bekommst.");
+        A("pl_connect", "Connect Spotify", "Mit Spotify verbinden");
+        A("pl_connecting", "Waiting for the login in your browser ...", "Warte auf die Anmeldung im Browser ...");
+        A("pl_loading", "Loading ...", "Lade ...");
+        A("pl_play", "Play", "Abspielen");
+        A("pl_refresh", "Refresh", "Aktualisieren");
+        A("pl_logout", "Disconnect", "Trennen");
+        A("pl_err", "Error: {0}", "Fehler: {0}");
+        A("pl_empty", "No playlists found", "Keine Playlists gefunden");
+        A("pl_opened", "Opened in Spotify - press play there.", "In Spotify geöffnet - dort auf Play drücken.");
+        A("pl_started", "Playing.", "Wird abgespielt.");
+        A("upd_title", "Update available", "Update verfügbar");
+        A("upd_versions", "Version {0}  →  {1}", "Version {0}  →  {1}");
+        A("upd_now", "Update now", "Jetzt aktualisieren");
+        A("upd_later", "Later", "Später");
+        A("upd_down", "Downloading ... {0} %", "Lade herunter ... {0} %");
+        A("upd_inst", "Installing ...", "Installiere ...");
+        A("upd_notes", "What's new", "Neuigkeiten");
+        A("sub_update", "Updating to version {0}", "Aktualisiere auf Version {0}");
+
 
         // Einstellungen
         A("set_title", "Settings", "Einstellungen");

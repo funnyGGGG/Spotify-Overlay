@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 static class App
 {
-    public const string Version = "1.6";
+    public const string Version = "1.16";
 }
 
 // Einstellungen, liegen in der Registry unter HKCU\Software\SpotifyOverlay
@@ -20,6 +20,7 @@ static class Config
     public static bool Discord = true;
     public static bool AutoUpdate = true;
     public static string DiscordId = "";
+    public static string SpotifyId = "";
     // Tastenkuerzel: Lauter, Leiser, Weiter, Zurueck, Play/Pause, Overlay ein/aus
     public static string[] Hk = new string[] { "", "", "", "", "", "" };
     public static int X = int.MinValue;
@@ -48,6 +49,7 @@ static class Config
                     Discord = GetInt(k, "Discord", 1) == 1;
                     AutoUpdate = GetInt(k, "AutoUpdate", 1) == 1;
                     DiscordId = (k.GetValue("DiscordId") as string) ?? "";
+                    SpotifyId = (k.GetValue("SpotifyId") as string) ?? "";
                     for (int i = 0; i < Hk.Length; i++) Hk[i] = (k.GetValue("Hk" + i) as string) ?? "";
                     X = GetInt(k, "X", int.MinValue);
                     Y = GetInt(k, "Y", int.MinValue);
@@ -72,6 +74,7 @@ static class Config
                 k.SetValue("Discord", Discord ? 1 : 0);
                 k.SetValue("AutoUpdate", AutoUpdate ? 1 : 0);
                 k.SetValue("DiscordId", DiscordId ?? "");
+                k.SetValue("SpotifyId", SpotifyId ?? "");
                 for (int i = 0; i < Hk.Length; i++) k.SetValue("Hk" + i, Hk[i] ?? "");
                 if (X != int.MinValue) k.SetValue("X", X);
                 if (Y != int.MinValue) k.SetValue("Y", Y);
