@@ -165,7 +165,7 @@ class SetupForm : Form
     static readonly Color GREEN = Color.FromArgb(29, 185, 84);
     static readonly Color GREY = Color.FromArgb(170, 170, 170);
 
-    bool uninstall;
+    bool uninstall, updating;
     Image logo;
     string dir;
     Panel pOpt, pProg, pDone;
@@ -176,9 +176,10 @@ class SetupForm : Form
     FlatBtn bBrowse, bCancel, bInstall, bFinish, bUnNo, bUnYes;
     Bar bar;
 
-    public SetupForm(bool uninstallMode)
+    public SetupForm(bool uninstallMode, bool updateMode)
     {
         uninstall = uninstallMode;
+        updating = updateMode;
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
@@ -216,6 +217,12 @@ class SetupForm : Form
         BuildDone();
         ApplyLang();
         Show(pOpt);
+
+        if (updating)
+        {
+            // Update: keine Fragen, der Fortschritt wird sofort gezeigt
+            Shown += delegate { Work(); };
+        }
     }
 
     Panel Page()
@@ -421,7 +428,7 @@ class SetupForm : Form
         using (SolidBrush grey = new SolidBrush(GREY))
         {
             g.DrawString("Spotify Overlay", f1, Brushes.White, 100, 28);
-            g.DrawString((uninstall ? Lang.T("sub_uninstall") : Lang.T("sub_install", App.Version)) + "  ·  funny.games", f2, grey, 101, 58);
+            g.DrawString((uninstall ? Lang.T("sub_uninstall") : (updating ? Lang.T("sub_update", App.Version) : Lang.T("sub_install", App.Version))) + "  ·  funny.games", f2, grey, 101, 58);
         }
     }
 
@@ -438,6 +445,15 @@ class SetupForm : Form
         Show(pProg);
         bool desk = !uninstall && cDesk.Checked, auto = !uninstall && cAuto.Checked;
         bool dc = !uninstall && cDiscord.Checked, upd = !uninstall && cUpdate.Checked;
+        if (updating)
+        {
+            // bisherige Einstellungen des Nutzers beibehalten
+            desk = File.Exists(Installer.DesktopLink());
+            using (RegistryKey rk = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
+                auto = rk != null && rk.GetValue("SpotifyOverlay") != null;
+            dc = Config.Discord;
+            upd = Config.AutoUpdate;
+        }
         Action<string, int> step = delegate(string text, int pct)
         {
             Ui(delegate { lStatus.Text = text; bar.Value = pct; });
@@ -450,6 +466,19 @@ class SetupForm : Form
             {
                 if (uninstall) Installer.Uninstall(dir, step);
                 else Installer.Install(dir, desk, auto, dc, upd, step);
+                if (updating)
+                {
+                    Ui(delegate
+                    {
+                        lStatus.Text = Lang.T("st_done");
+                        try { Process.Start(Path.Combine(dir, "SpotifyOverlay.exe")); } catch { }
+                        System.Windows.Forms.Timer close = new System.Windows.Forms.Timer();
+                        close.Interval = 1200;
+                        close.Tick += delegate { Close(); };
+                        close.Start();
+                    });
+                    return;
+                }
                 Ui(delegate
                 {
                     lDoneTitle.Text = uninstall ? Lang.T("done_un") : Lang.T("done_inst");
@@ -474,11 +503,12 @@ class SetupForm : Form
     static void Main(string[] args)
     {
         Config.Load();
-        bool un = false, silent = false;
+        bool un = false, silent = false, upd = false;
         foreach (string a in args)
         {
             if (a.ToLower() == "/uninstall") un = true;
             if (a.ToLower() == "/silent") silent = true;
+            if (a.ToLower() == "/update") upd = true;
         }
 
         if (silent)
@@ -499,6 +529,7 @@ class SetupForm : Form
         }
 
         Application.EnableVisualStyles();
-        Application.Run(new SetupForm(un));
+        if (upd) System.Threading.Thread.Sleep(1500);   // alte Version beendet sich gerade
+        Application.Run(new SetupForm(un, upd));
     }
 }
