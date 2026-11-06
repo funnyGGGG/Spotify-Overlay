@@ -139,41 +139,37 @@ static class Installer
             Registry.CurrentUser.DeleteSubKeyTree(Config.Key, false);
         }
         catch { }
-        // Uninstall.exe loescht sich nach dem Beenden selbst
-        try
-        {
-            string un = Path.Combine(dir, "Uninstall.exe");
-            ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", "/c ping 127.0.0.1 -n 3 >nul & del /f /q \"" + un + "\" & rmdir \"" + dir + "\"");
-            psi.CreateNoWindow = true;
-            psi.WindowStyle = ProcessWindowStyle.Hidden;
-            psi.UseShellExecute = false;
-            Process.Start(psi);
-        }
-        catch { }
+        // Uninstall.exe wurde aus dem Temp-Ordner gestartet und ist nicht mehr im Installationsordner
+        try { File.Delete(Path.Combine(dir, "Uninstall.exe")); } catch { }
+        try { Directory.Delete(dir, false); } catch { }
         Say(step, "st_done", 100);
     }
 }
 
+// Installer-Fenster: Seitenleiste mit den Schritten links, Inhalt rechts
 class SetupForm : Form
 {
     [DllImport("user32.dll")] static extern bool ReleaseCapture();
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, int msg, int w, int l);
     [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
 
-    static readonly Color BG = Color.FromArgb(18, 18, 18);
-    static readonly Color PANEL = Color.FromArgb(34, 34, 34);
+    static readonly Color BG = Color.FromArgb(24, 24, 24);
+    static readonly Color SIDE = Color.FromArgb(16, 16, 16);
+    static readonly Color FIELD = Color.FromArgb(40, 40, 40);
     static readonly Color GREEN = Color.FromArgb(29, 185, 84);
-    static readonly Color GREY = Color.FromArgb(170, 170, 170);
+    static readonly Color GREY = Color.FromArgb(160, 160, 160);
+    const int SideW = 210;
 
     bool uninstall, updating;
+    int step = 0;
     Image logo;
     string dir;
     Panel pOpt, pProg, pDone;
-    Label lLang, lIntro, lInfo, lFolder, lStatus, lDoneTitle, lDoneText, lUnQ, lUnText;
+    Label lHead, lIntro, lInfo, lLang, lFolder, lStatus, lDoneHead, lDoneText, lUnText, lProgHead;
     ComboBox cbLang;
     TextBox txtDir;
-    CheckBox cDesk, cAuto, cDiscord, cUpdate, cRun;
-    FlatBtn bBrowse, bCancel, bInstall, bFinish, bUnNo, bUnYes;
+    Toggle tDesk, tAuto, tDiscord, tUpdate, tRun;
+    FlatBtn bBrowse, bCancel, bInstall, bFinish;
     Bar bar;
 
     public SetupForm(bool uninstallMode, bool updateMode)
@@ -183,9 +179,9 @@ class SetupForm : Form
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(560, 470);
+        ClientSize = new Size(740, 470);
         BackColor = BG;
-        Region = Region.FromHrgn(CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 18, 18));
+        Region = Region.FromHrgn(CreateRoundRectRgn(0, 0, Width + 1, Height + 1, 14, 14));
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         try
         {
@@ -203,7 +199,7 @@ class SetupForm : Form
         close.AutoSize = true;
         close.Font = new Font("Segoe UI", 11f);
         close.Cursor = Cursors.Hand;
-        close.Location = new Point(528, 10);
+        close.Location = new Point(708, 10);
         close.Click += delegate { Close(); };
         close.MouseEnter += delegate { close.ForeColor = Color.White; };
         close.MouseLeave += delegate { close.ForeColor = GREY; };
@@ -216,7 +212,7 @@ class SetupForm : Form
         BuildProgress();
         BuildDone();
         ApplyLang();
-        Show(pOpt);
+        Show(pOpt, 0);
 
         if (updating)
         {
@@ -229,19 +225,21 @@ class SetupForm : Form
     {
         Panel p = new Panel();
         p.BackColor = BG;
-        p.Location = new Point(0, 100);
-        p.Size = new Size(560, 370);
+        p.Location = new Point(SideW + 32, 40);
+        p.Size = new Size(740 - SideW - 64, 400);
         p.Visible = false;
         Controls.Add(p);
         return p;
     }
 
-    void Show(Panel p)
+    void Show(Panel p, int idx)
     {
         pOpt.Visible = false;
         pProg.Visible = false;
         pDone.Visible = false;
         p.Visible = true;
+        step = idx;
+        Invalidate();
     }
 
     Label Lbl(Panel p, int x, int y, int w, int h, float size, Color c, FontStyle st)
@@ -251,37 +249,37 @@ class SetupForm : Form
         l.Size = new Size(w, h);
         l.ForeColor = c;
         l.BackColor = BG;
+        l.UseMnemonic = false;
         l.Font = new Font("Segoe UI", size, st);
         p.Controls.Add(l);
         return l;
     }
 
-    CheckBox Chk(Panel p, int x, int y, bool on)
+    Toggle Tog(Panel p, int y, bool on)
     {
-        CheckBox c = new CheckBox();
-        c.Location = new Point(x, y);
-        c.Size = new Size(500, 24);
-        c.Checked = on;
-        c.ForeColor = Color.White;
-        c.BackColor = BG;
-        c.Font = new Font("Segoe UI", 10f);
-        c.FlatStyle = FlatStyle.Flat;
-        c.Cursor = Cursors.Hand;
-        p.Controls.Add(c);
-        return c;
+        Toggle t = new Toggle();
+        t.Location = new Point(0, y);
+        t.Size = new Size(468, 26);
+        t.Checked = on;
+        p.Controls.Add(t);
+        return t;
     }
 
     void BuildOptions()
     {
-        lLang = Lbl(pOpt, 28, 12, 120, 22, 10f, GREY, FontStyle.Regular);
+        lHead = Lbl(pOpt, 0, 0, 468, 34, 18f, Color.White, FontStyle.Bold);
+        lIntro = Lbl(pOpt, 0, 40, 468, 22, 10.5f, Color.White, FontStyle.Regular);
+        lInfo = Lbl(pOpt, 0, 64, 468, 58, 9.5f, GREY, FontStyle.Regular);
+
+        lLang = Lbl(pOpt, 0, 138, 120, 24, 10f, GREY, FontStyle.Regular);
         cbLang = new ComboBox();
         cbLang.DropDownStyle = ComboBoxStyle.DropDownList;
         cbLang.Items.AddRange(new object[] { "English", "Deutsch" });
         cbLang.SelectedIndex = Lang.Cur == "de" ? 1 : 0;
-        cbLang.Location = new Point(150, 9);
-        cbLang.Size = new Size(140, 26);
+        cbLang.Location = new Point(120, 134);
+        cbLang.Size = new Size(170, 28);
         cbLang.FlatStyle = FlatStyle.Flat;
-        cbLang.BackColor = PANEL;
+        cbLang.BackColor = FIELD;
         cbLang.ForeColor = Color.White;
         cbLang.Font = new Font("Segoe UI", 10f);
         cbLang.SelectedIndexChanged += delegate
@@ -291,23 +289,20 @@ class SetupForm : Form
         };
         pOpt.Controls.Add(cbLang);
 
-        lIntro = Lbl(pOpt, 28, 50, 510, 24, 11f, Color.White, FontStyle.Bold);
-        lInfo = Lbl(pOpt, 28, 76, 510, 56, 9.5f, GREY, FontStyle.Regular);
-        lFolder = Lbl(pOpt, 28, 142, 300, 20, 9.5f, GREY, FontStyle.Regular);
-
+        lFolder = Lbl(pOpt, 0, 180, 300, 22, 9.5f, GREY, FontStyle.Regular);
         txtDir = new TextBox();
         txtDir.Text = dir;
-        txtDir.Location = new Point(28, 166);
-        txtDir.Size = new Size(384, 28);
-        txtDir.BackColor = PANEL;
+        txtDir.Location = new Point(0, 204);
+        txtDir.Size = new Size(350, 28);
+        txtDir.BackColor = FIELD;
         txtDir.ForeColor = Color.White;
         txtDir.BorderStyle = BorderStyle.FixedSingle;
         txtDir.Font = new Font("Segoe UI", 10f);
         pOpt.Controls.Add(txtDir);
 
-        bBrowse = new FlatBtn("", PANEL, Color.White);
-        bBrowse.Location = new Point(420, 163);
-        bBrowse.Size = new Size(110, 31);
+        bBrowse = new FlatBtn("", FIELD, Color.White);
+        bBrowse.Location = new Point(358, 201);
+        bBrowse.Size = new Size(110, 32);
         bBrowse.Click += delegate
         {
             using (FolderBrowserDialog fb = new FolderBrowserDialog())
@@ -319,16 +314,18 @@ class SetupForm : Form
         };
         pOpt.Controls.Add(bBrowse);
 
-        cDesk = Chk(pOpt, 28, 212, true);
-        cAuto = Chk(pOpt, 28, 240, false);
-        cDiscord = Chk(pOpt, 28, 268, true);
-        cUpdate = Chk(pOpt, 28, 296, true);
+        tDesk = Tog(pOpt, 244, true);
+        tAuto = Tog(pOpt, 274, false);
+        tDiscord = Tog(pOpt, 304, true);
+        tUpdate = Tog(pOpt, 334, true);
 
-        bCancel = new FlatBtn("", PANEL, Color.White);
-        bCancel.Location = new Point(262, 326);
+        bCancel = new FlatBtn("", FIELD, Color.White);
+        bCancel.Location = new Point(204, 366);
+        bCancel.Size = new Size(120, 38);
         bCancel.Click += delegate { Close(); };
         bInstall = new FlatBtn("", GREEN, Color.Black);
-        bInstall.Location = new Point(402, 326);
+        bInstall.Location = new Point(334, 366);
+        bInstall.Size = new Size(134, 38);
         bInstall.Click += delegate
         {
             string d = txtDir.Text.Trim();
@@ -342,38 +339,43 @@ class SetupForm : Form
 
     void BuildUninstall()
     {
-        lUnQ = Lbl(pOpt, 28, 20, 510, 28, 12f, Color.White, FontStyle.Bold);
-        lUnText = Lbl(pOpt, 28, 56, 510, 60, 10f, GREY, FontStyle.Regular);
-        bUnNo = new FlatBtn("", PANEL, Color.White);
-        bUnNo.Location = new Point(262, 326);
-        bUnNo.Click += delegate { Close(); };
-        bUnYes = new FlatBtn("", Color.FromArgb(200, 60, 50), Color.White);
-        bUnYes.Location = new Point(402, 326);
-        bUnYes.Click += delegate { Work(); };
-        pOpt.Controls.Add(bUnNo);
-        pOpt.Controls.Add(bUnYes);
+        lHead = Lbl(pOpt, 0, 0, 468, 34, 18f, Color.White, FontStyle.Bold);
+        lIntro = Lbl(pOpt, 0, 46, 468, 28, 11.5f, Color.White, FontStyle.Regular);
+        lUnText = Lbl(pOpt, 0, 84, 468, 70, 10f, GREY, FontStyle.Regular);
+        bCancel = new FlatBtn("", FIELD, Color.White);
+        bCancel.Location = new Point(204, 366);
+        bCancel.Size = new Size(120, 38);
+        bCancel.Click += delegate { Close(); };
+        bInstall = new FlatBtn("", Color.FromArgb(200, 60, 50), Color.White);
+        bInstall.Location = new Point(334, 366);
+        bInstall.Size = new Size(134, 38);
+        bInstall.Click += delegate { Work(); };
+        pOpt.Controls.Add(bCancel);
+        pOpt.Controls.Add(bInstall);
     }
 
     void BuildProgress()
     {
-        lStatus = Lbl(pProg, 28, 90, 500, 26, 11f, Color.White, FontStyle.Bold);
+        lProgHead = Lbl(pProg, 0, 0, 468, 34, 18f, Color.White, FontStyle.Bold);
+        lStatus = Lbl(pProg, 0, 110, 468, 26, 11f, Color.White, FontStyle.Regular);
         bar = new Bar();
-        bar.Location = new Point(28, 130);
-        bar.Size = new Size(504, 8);
+        bar.Location = new Point(0, 146);
+        bar.Size = new Size(468, 6);
         pProg.Controls.Add(bar);
     }
 
     void BuildDone()
     {
-        lDoneTitle = Lbl(pDone, 28, 20, 500, 34, 18f, GREEN, FontStyle.Bold);
-        lDoneText = Lbl(pDone, 28, 72, 510, 130, 10f, GREY, FontStyle.Regular);
-        cRun = Chk(pDone, 28, 226, true);
-        if (uninstall) cRun.Visible = false;
+        lDoneHead = Lbl(pDone, 0, 0, 468, 34, 18f, GREEN, FontStyle.Bold);
+        lDoneText = Lbl(pDone, 0, 50, 468, 140, 10f, GREY, FontStyle.Regular);
+        tRun = Tog(pDone, 206, true);
+        if (uninstall) tRun.Visible = false;
         bFinish = new FlatBtn("", GREEN, Color.Black);
-        bFinish.Location = new Point(402, 326);
+        bFinish.Location = new Point(334, 366);
+        bFinish.Size = new Size(134, 38);
         bFinish.Click += delegate
         {
-            if (!uninstall && cRun.Checked)
+            if (!uninstall && tRun.Checked)
             {
                 try { Process.Start(Path.Combine(dir, "SpotifyOverlay.exe")); } catch { }
             }
@@ -385,32 +387,36 @@ class SetupForm : Form
     // Alle Texte in der gewaehlten Sprache setzen
     void ApplyLang()
     {
+        lProgHead.Text = Lang.T("head_working");
         if (uninstall)
         {
-            lUnQ.Text = Lang.T("uninst_q");
+            lHead.Text = Lang.T("head_uninstall");
+            lIntro.Text = Lang.T("uninst_q");
             lUnText.Text = Lang.T("uninst_text", dir);
-            bUnNo.Text = Lang.T("btn_cancel");
-            bUnYes.Text = Lang.T("btn_uninstall");
+            bCancel.Text = Lang.T("btn_cancel");
+            bInstall.Text = Lang.T("btn_uninstall");
         }
         else
         {
-            lLang.Text = Lang.T("lang_label");
+            lHead.Text = updating ? Lang.T("head_update") : Lang.T("head_install");
             lIntro.Text = Lang.T("intro");
             lInfo.Text = Lang.T("intro2");
+            lLang.Text = Lang.T("lang_label");
             lFolder.Text = Lang.T("folder");
             bBrowse.Text = Lang.T("browse");
-            cDesk.Text = Lang.T("chk_desktop");
-            cAuto.Text = Lang.T("chk_auto");
-            cDiscord.Text = Lang.T("chk_discord");
-            cUpdate.Text = Lang.T("chk_update");
+            tDesk.Text = Lang.T("chk_desktop");
+            tAuto.Text = Lang.T("chk_auto");
+            tDiscord.Text = Lang.T("chk_discord");
+            tUpdate.Text = Lang.T("chk_update");
             bCancel.Text = Lang.T("btn_cancel");
             bInstall.Text = Lang.T("btn_install");
         }
-        cRun.Text = Lang.T("run_now");
+        tRun.Text = Lang.T("run_now");
         bFinish.Text = Lang.T("btn_finish");
         Invalidate();
     }
 
+    // Seitenleiste mit Logo und den drei Schritten
     protected override void OnPaint(PaintEventArgs e)
     {
         Graphics g = e.Graphics;
@@ -418,23 +424,47 @@ class SetupForm : Form
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         g.Clear(BG);
-        using (LinearGradientBrush b = new LinearGradientBrush(new Rectangle(0, 0, Width, 100), Color.FromArgb(14, 70, 38), BG, 90f))
-            g.FillRectangle(b, 0, 0, Width, 100);
-        using (LinearGradientBrush b = new LinearGradientBrush(new Rectangle(0, 0, Width, 4), GREEN, Color.FromArgb(232, 120, 40), 0f))
-            g.FillRectangle(b, 0, 0, Width, 4);
-        if (logo != null) g.DrawImage(logo, new Rectangle(28, 24, 58, 58));
-        using (Font f1 = new Font("Segoe UI", 20f, FontStyle.Bold, GraphicsUnit.Pixel))
-        using (Font f2 = new Font("Segoe UI", 13f, FontStyle.Regular, GraphicsUnit.Pixel))
+        using (SolidBrush b = new SolidBrush(SIDE)) g.FillRectangle(b, 0, 0, SideW, Height);
+        using (Pen p = new Pen(Color.FromArgb(34, 34, 34))) g.DrawLine(p, SideW, 0, SideW, Height);
+
+        if (logo != null) g.DrawImage(logo, new Rectangle(28, 32, 52, 52));
+        using (Font f1 = new Font("Segoe UI", 17f, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (Font f2 = new Font("Segoe UI", 12f, FontStyle.Regular, GraphicsUnit.Pixel))
+        using (Font f3 = new Font("Segoe UI", 13f, FontStyle.Regular, GraphicsUnit.Pixel))
+        using (Font f4 = new Font("Segoe UI", 12f, FontStyle.Bold, GraphicsUnit.Pixel))
+        using (SolidBrush white = new SolidBrush(Color.White))
         using (SolidBrush grey = new SolidBrush(GREY))
+        using (SolidBrush green = new SolidBrush(GREEN))
+        using (SolidBrush dark = new SolidBrush(Color.FromArgb(90, 90, 90)))
         {
-            g.DrawString("Spotify Overlay", f1, Brushes.White, 100, 28);
-            g.DrawString((uninstall ? Lang.T("sub_uninstall") : (updating ? Lang.T("sub_update", App.Version) : Lang.T("sub_install", App.Version))) + "  ·  funny.games", f2, grey, 101, 58);
+            g.DrawString("Spotify Overlay", f1, white, 28, 98);
+            g.DrawString(Lang.T("lbl_version", App.Version), f2, grey, 28, 122);
+
+            string[] names = { Lang.T("step_setup"), Lang.T("step_install"), Lang.T("step_done") };
+            for (int i = 0; i < 3; i++)
+            {
+                int y = 190 + i * 44;
+                bool past = i < step, now = i == step;
+                if (past || now)
+                    g.FillEllipse(green, 28, y, 22, 22);
+                else
+                    using (Pen p = new Pen(Color.FromArgb(70, 70, 70), 1.5f)) g.DrawEllipse(p, 28, y, 22, 22);
+
+                if (past)
+                    using (Pen p = new Pen(Color.Black, 2f))
+                        g.DrawLines(p, new Point[] { new Point(34, y + 11), new Point(38, y + 15), new Point(45, y + 7) });
+                else
+                    g.DrawString((i + 1).ToString(), f4, now ? (Brush)new SolidBrush(Color.Black) : dark, new RectangleF(28, y + 3, 22, 18), new StringFormat { Alignment = StringAlignment.Center });
+
+                g.DrawString(names[i], f3, (past || now) ? white : grey, 62, y + 2);
+            }
+            g.DrawString("funny.games", f2, dark, 28, Height - 40);
         }
     }
 
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left && e.Y < 100) { ReleaseCapture(); SendMessage(Handle, 0xA1, 2, 0); }
+        if (e.Button == MouseButtons.Left && e.Y < 60) { ReleaseCapture(); SendMessage(Handle, 0xA1, 2, 0); }
         base.OnMouseDown(e);
     }
 
@@ -442,9 +472,9 @@ class SetupForm : Form
 
     void Work()
     {
-        Show(pProg);
-        bool desk = !uninstall && cDesk.Checked, auto = !uninstall && cAuto.Checked;
-        bool dc = !uninstall && cDiscord.Checked, upd = !uninstall && cUpdate.Checked;
+        Show(pProg, 1);
+        bool desk = !uninstall && tDesk.Checked, auto = !uninstall && tAuto.Checked;
+        bool dc = !uninstall && tDiscord.Checked, upd = !uninstall && tUpdate.Checked;
         if (updating)
         {
             // bisherige Einstellungen des Nutzers beibehalten
@@ -453,8 +483,9 @@ class SetupForm : Form
                 auto = rk != null && rk.GetValue("SpotifyOverlay") != null;
             dc = Config.Discord;
             upd = Config.AutoUpdate;
+            lProgHead.Text = Lang.T("head_update");
         }
-        Action<string, int> step = delegate(string text, int pct)
+        Action<string, int> report = delegate(string text, int pct)
         {
             Ui(delegate { lStatus.Text = text; bar.Value = pct; });
             Thread.Sleep(300);
@@ -464,13 +495,16 @@ class SetupForm : Form
         {
             try
             {
-                if (uninstall) Installer.Uninstall(dir, step);
-                else Installer.Install(dir, desk, auto, dc, upd, step);
+                if (uninstall) Installer.Uninstall(dir, report);
+                else Installer.Install(dir, desk, auto, dc, upd, report);
+
                 if (updating)
                 {
                     Ui(delegate
                     {
                         lStatus.Text = Lang.T("st_done");
+                        step = 2;
+                        Invalidate();
                         try { Process.Start(Path.Combine(dir, "SpotifyOverlay.exe")); } catch { }
                         System.Windows.Forms.Timer close = new System.Windows.Forms.Timer();
                         close.Interval = 1200;
@@ -481,9 +515,9 @@ class SetupForm : Form
                 }
                 Ui(delegate
                 {
-                    lDoneTitle.Text = uninstall ? Lang.T("done_un") : Lang.T("done_inst");
+                    lDoneHead.Text = uninstall ? Lang.T("done_un") : Lang.T("done_inst");
                     lDoneText.Text = uninstall ? Lang.T("done_un_text") : Lang.T("done_text", dir);
-                    Show(pDone);
+                    Show(pDone, 2);
                 });
             }
             catch (Exception ex)
@@ -497,6 +531,12 @@ class SetupForm : Form
         });
         t.IsBackground = true;
         t.Start();
+    }
+
+    static bool FromTemp(string[] args)
+    {
+        foreach (string a in args) if (a.ToLower() == "/fromtemp") return true;
+        return false;
     }
 
     [STAThread]
@@ -528,8 +568,21 @@ class SetupForm : Form
             return;
         }
 
+        if (un && !FromTemp(args))
+        {
+            // Aus dem Installationsordner heraus kann sich das Programm nicht selbst loeschen:
+            // darum zuerst eine Kopie im Temp-Ordner starten
+            try
+            {
+                string tmp = Path.Combine(Path.GetTempPath(), "SpotifyOverlay_Uninstall.exe");
+                File.Copy(Application.ExecutablePath, tmp, true);
+                Process.Start(tmp, "/uninstall /fromtemp");
+                return;
+            }
+            catch { }
+        }
         Application.EnableVisualStyles();
-        if (upd) System.Threading.Thread.Sleep(1500);   // alte Version beendet sich gerade
+        if (upd) Thread.Sleep(1500);   // alte Version beendet sich gerade
         Application.Run(new SetupForm(un, upd));
     }
 }
