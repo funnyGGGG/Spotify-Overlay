@@ -1,41 +1,19 @@
 # Changelog / Änderungen
 
+## 1.17
+- **EN:** Playlist login fixed, clear error messages with tips.
+- **DE:** Playlist-Anmeldung repariert, klare Fehlermeldungen mit Tipps.
+- **EN:** New, wider settings window with tabs, a "Check for updates" button and a "Help & Contact" tab with the Discord link.
+- **DE:** Neues, breiteres Einstellungsfenster mit Tabs, Button "Nach Updates suchen" und Tab "Hilfe & Kontakt" mit Discord-Link.
+- **EN:** New installer design with a step list and switches.
+- **DE:** Neues Installer-Design mit Schrittliste und Schaltern.
+- **EN:** Volume slider no longer jumps back. Play / pause / next / previous react instantly.
+- **DE:** Der Lautstärkeregler springt nicht mehr zurück. Play / Pause / Weiter / Zurück reagieren sofort.
+- **EN:** Discord activity works without an own Discord app and can be turned off in the settings.
+- **DE:** Die Discord-Aktivität funktioniert ohne eigene Discord-App und lässt sich in den Einstellungen ausschalten.
+- **EN:** Fewer antivirus false alarms. The Discord server is shown on GitHub.
+- **DE:** Weniger Fehlalarme von Virenscannern. Der Discord-Server ist auf GitHub zu sehen.
+
 ## 1.16
-- **EN:** `build.bat` now puts the finished installer straight into your Downloads folder.
-- **DE:** `build.bat` legt den fertigen Installer jetzt direkt in deinen Downloads-Ordner.
-
-## 1.15
-- **EN:** Built-in help / tutorial in the settings (English and German).
-- **DE:** Eingebaute Hilfe / Anleitung in den Einstellungen (Englisch und Deutsch).
-
-## 1.14
-- **EN:** New update window with the changes and a download bar. The installer shows its progress while updating.
-- **DE:** Neues Update-Fenster mit den Änderungen und Download-Balken. Der Installer zeigt beim Update den Fortschritt.
-
-## 1.13
-- **EN:** New playlists button: pick one of your Spotify playlists and play it.
-- **DE:** Neuer Playlist-Button: eine deiner Spotify-Playlists auswählen und abspielen.
-
-## 1.12
-- **EN:** Ads are shown as "Advertisement", with the ad picture when Spotify provides one.
-- **DE:** Werbung wird als "Werbung" angezeigt, mit dem Werbebild, wenn Spotify eins liefert.
-
-## 1.11
-- **EN:** Keybinds work with every key (not only F keys), with or without Ctrl/Alt/Shift/Win.
-- **DE:** Tastenkürzel gehen mit jeder Taste (nicht nur F-Tasten), mit oder ohne Strg/Alt/Umschalt/Win.
-
-## 1.10
-- **EN:** Fixed lag at startup. Spotify is now checked in the background.
-- **DE:** Ruckeln beim Start behoben. Spotify wird jetzt im Hintergrund abgefragt.
-
-## 1.9
-- **EN:** Click or drag the progress bar to skip within a song.
-- **DE:** Auf den Fortschrittsbalken klicken oder ziehen, um im Song vorzuspulen.
-
-## 1.8
-- **EN:** The overlay stays visible when you Alt+Tab out of a game. The Alt+Tab preview is no longer squeezed.
-- **DE:** Das Overlay bleibt sichtbar, wenn du per Alt+Tab aus dem Spiel gehst. Die Alt+Tab-Vorschau ist nicht mehr zusammengedrückt.
-
-## 1.7
-- **EN:** The buttons and keybinds only control Spotify, not a YouTube video that is open in the browser.
-- **DE:** Die Tasten und Tastenkürzel steuern nur Spotify, nicht mehr ein YouTube-Video im Browser.
+- **EN:** Buttons and keybinds only control Spotify, not a YouTube video. The overlay stays visible on Alt+Tab. Skip in a song by clicking the progress bar. Faster startup. Keybinds with every key. Ads with picture. Playlists button. Update window. Built-in help. README in English and German.
+- **DE:** Tasten und Tastenkürzel steuern nur Spotify, nicht ein YouTube-Video. Das Overlay bleibt bei Alt+Tab sichtbar. Vorspulen per Klick auf den Fortschrittsbalken. Schnellerer Start. Tastenkürzel mit jeder Taste. Werbung mit Bild. Playlist-Button. Update-Fenster. Eingebaute Hilfe. README auf Englisch und Deutsch.

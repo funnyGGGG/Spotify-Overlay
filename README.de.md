@@ -4,6 +4,8 @@
 
 Erstellt von **funny.games**
 
+[![Discord](https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?logo=discord&logoColor=white)](https://discord.gg/QfxEnH2gN9)
+
 Ein kleines Overlay für Windows, das immer im Vordergrund zeigt, was gerade auf Spotify läuft. Es funktioniert über Spielen im Fenstermodus oder im randlosen Fenster.
 
 ## Funktionen
@@ -44,11 +46,8 @@ Windows SmartScreen kann bei nicht signierten Programmen warnen. Auf "Weitere In
 
 In den Einstellungen gibt es einen Button **Hilfe / Anleitung** mit all dem und den Einrichtungsschritten unten.
 
-## Discord-Aktivität (optional)
-1. Öffne https://discord.com/developers/applications und klicke auf **New Application**.
-2. Kopiere die **Application ID**.
-3. Füge sie in den Einstellungen (Zahnrad) bei *Discord-Anwendungs-ID* ein.
-4. Die Discord-Desktop-App muss laufen und *Aktuelle Aktivität anzeigen* muss an sein. Die Statuszeile in den Einstellungen zeigt Fehler.
+## Discord-Aktivität
+In den Einstellungen (*Verbindungen*) einschalten. Discord zeigt dann, welchen Song du hörst und wie lange er noch läuft. Du kannst es jederzeit ausschalten. Die Discord-Desktop-App muss laufen und in Discord muss *Aktuelle Aktivität anzeigen* an sein. Die Statuszeile in den Einstellungen zeigt Fehler.
 
 ## Playlists (optional)
 1. Öffne https://developer.spotify.com/dashboard und erstelle eine App.
@@ -66,7 +65,14 @@ Die App prüft das neueste GitHub-Release und zeigt ein Update-Fenster mit den �
 ## Selbst bauen
 Führe `build.bat` unter Windows aus. Es nutzt den C#-Compiler, der in Windows steckt, und legt den Installer in deinen Downloads-Ordner.
 
-Neue Version veröffentlichen: ein Release mit einem Tag wie `v1.17` erstellen. GitHub baut den Installer und hängt ihn an.
+Neue Version veröffentlichen: ein Release mit einem Tag wie `v1.18` erstellen. GitHub baut den Installer und hängt ihn an.
 
 ## Lizenz
 MIT
+
+## Hilfe und Kontakt
+Fragen, Fehler oder Ideen? Komm auf den Discord: https://discord.gg/QfxEnH2gN9
+Derselbe Link steht in der App unter *Einstellungen -> Hilfe & Kontakt*.
+
+## Virenwarnung
+Der Installer ist nicht digital signiert. Deshalb melden manche Virenscanner und Windows SmartScreen ihn fälschlich als Bedrohung (Fehlalarm), wie bei vielen kleinen kostenlosen Programmen. Der Code ist offen, du kannst ihn lesen und mit `build.bat` selbst bauen. Zu jedem Release gehört außerdem `SHA256.txt`, damit du prüfen kannst, dass die Datei nicht verändert wurde. Wird sie gemeldet, kannst du sie beim Hersteller oder bei Microsoft als Fehlalarm melden (https://www.microsoft.com/wdsi/filesubmission).
