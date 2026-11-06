@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -19,7 +20,7 @@ class DiscordRpc
     long lastEnd = 0;
     DateTime lastTry = DateTime.MinValue;
     bool busy = false;
-    bool noType = false;
+    int level = 0;
     readonly object gate = new object();
 
     static string Esc(string s)
@@ -56,10 +57,11 @@ class DiscordRpc
                (activity == null ? "" : ",\"activity\":" + activity) + "},\"nonce\":\"" + Guid.NewGuid() + "\"}";
     }
 
-    string Activity(bool withType, string title, string artist, bool playing, double pos, double dur)
+    // Stufe 0: alles, 1: ohne Aktivitaetstyp, 2: ohne Typ und ohne Button (falls eine Discord-Version etwas ablehnt)
+    string Activity(int lvl, string title, string artist, bool playing, double pos, double dur)
     {
         StringBuilder a = new StringBuilder("{");
-        if (withType) a.Append("\"type\":2,");
+        if (lvl == 0) a.Append("\"type\":2,");
         a.Append("\"details\":\"").Append(Esc(Cut(title))).Append("\"");
         a.Append(",\"state\":\"").Append(Esc(Cut(playing ? artist : Lang.T("dc_paused")))).Append("\"");
         if (playing)
@@ -69,8 +71,38 @@ class DiscordRpc
             if (dur > 0) a.Append(",\"end\":").Append(start + (long)dur);
             a.Append("}");
         }
-        a.Append(",\"assets\":{\"large_image\":\"logo\",\"large_text\":\"Spotify Overlay\"}}");
+        a.Append(",\"assets\":{\"large_image\":\"logo\",\"large_text\":\"Spotify Overlay\"}");
+        string gh = Contact.GitHub;
+        if (lvl <= 1 && gh.Length > 0)
+            a.Append(",\"buttons\":[{\"label\":\"Get Spotify Overlay\",\"url\":\"").Append(Esc(gh)).Append("\"}]");
+        a.Append("}");
         return a.ToString();
+    }
+
+    // Die Anwendungs-ID ist oeffentlich und steckt in der Datei discord_app.txt (wird eingebettet).
+    // So muss niemand eine eigene Discord-App anlegen. Wer will, kann in den Einstellungen eine eigene eintragen.
+    public static string DefaultId
+    {
+        get
+        {
+            try
+            {
+                using (Stream rs = Assembly.GetExecutingAssembly().GetManifestResourceStream("discord_app.txt"))
+                {
+                    if (rs != null)
+                        using (StreamReader r = new StreamReader(rs)) return r.ReadToEnd().Trim();
+                }
+            }
+            catch { }
+            return "";
+        }
+    }
+
+    public static string EffectiveId(string custom)
+    {
+        custom = (custom ?? "").Trim();
+        if (Regex.IsMatch(custom, "^[0-9]{15,25}$")) return custom;
+        return DefaultId;
     }
 
     public void Update(bool on, string clientId, string title, string artist, bool playing, double pos, double dur, bool hasTrack)
@@ -79,8 +111,7 @@ class DiscordRpc
         bool active = on && idOk && hasTrack;
 
         if (!on) Status = "off";
-        else if (clientId.Length == 0) Status = "no application ID entered";
-        else if (!idOk) Status = "application ID must be only digits (15-25)";
+        else if (!idOk) Status = "no valid Discord application ID in this build (see assets/discord_app.txt)";
         else if (!hasTrack) Status = "waiting for a song";
 
         string key = active ? title + "|" + artist + "|" + playing + "|" + clientId : "off";
@@ -101,18 +132,13 @@ class DiscordRpc
         busy = true;
 
         string id = clientId;
-        string withType = null, without = null;
+        string[] frames = new string[3];
         if (active)
-        {
-            withType = Frame(Activity(true, title, artist, playing, pos, dur));
-            without = Frame(Activity(false, title, artist, playing, pos, dur));
-        }
+            for (int i = 0; i < 3; i++) frames[i] = Frame(Activity(i, title, artist, playing, pos, dur));
         else
-        {
-            withType = without = Frame(null);
-        }
+            frames[0] = frames[1] = frames[2] = Frame(null);
         bool isActive = active;
-        ThreadPool.QueueUserWorkItem(delegate { Push(id, noType ? without : withType, without, isActive); });
+        ThreadPool.QueueUserWorkItem(delegate { Push(id, frames, isActive); });
     }
 
     static string ErrorOf(string reply)
@@ -121,26 +147,22 @@ class DiscordRpc
         return m.Success ? m.Groups[1].Value : reply;
     }
 
-    void Push(string id, string json, string fallback, bool active)
+    void Push(string id, string[] frames, bool active)
     {
         lock (gate)
         {
             try
             {
                 Connect(id);
-                Write(1, json);
-                string reply = Read();
-                if (reply.Contains("\"evt\":\"ERROR\""))
+                string reply = "";
+                bool ok = false;
+                for (int l = level; l < 3 && !ok; l++)
                 {
-                    if (json != fallback)
-                    {
-                        // manche Discord-Versionen kennen "type" nicht -> ohne erneut versuchen
-                        noType = true;
-                        Write(1, fallback);
-                        reply = Read();
-                    }
-                    if (reply.Contains("\"evt\":\"ERROR\"")) throw new IOException(ErrorOf(reply));
+                    Write(1, frames[l]);
+                    reply = Read();
+                    if (!reply.Contains("\"evt\":\"ERROR\"")) { ok = true; level = l; }
                 }
+                if (!ok) throw new IOException(ErrorOf(reply));
                 if (active) Status = "OK - activity sent";
             }
             catch (Exception ex)

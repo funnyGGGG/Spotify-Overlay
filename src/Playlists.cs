@@ -30,14 +30,14 @@ class PlaylistForm : Form
 
         info = new Label();
         info.Location = new Point(16, 12);
-        info.Size = new Size(388, 60);
+        info.Size = new Size(388, 90);
         info.ForeColor = Color.FromArgb(180, 180, 180);
         info.BackColor = BG;
         Controls.Add(info);
 
         list = new ListBox();
-        list.Location = new Point(16, 76);
-        list.Size = new Size(388, 340);
+        list.Location = new Point(16, 108);
+        list.Size = new Size(388, 310);
         list.BackColor = PANEL;
         list.ForeColor = Color.White;
         list.BorderStyle = BorderStyle.None;

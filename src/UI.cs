@@ -2,7 +2,6 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 // Flacher Button im dunklen Stil
@@ -51,12 +50,9 @@ class Bar : Control
     }
 }
 
-// Feld, in das man ein Tastenkuerzel eintippt (jede Taste, mit oder ohne Strg/Alt/Umschalt/Win)
+// Feld, in das man ein Tastenkuerzel eintippt (jede Taste, mit oder ohne Strg/Alt/Umschalt)
 class KeyBox : TextBox
 {
-    [DllImport("user32.dll")]
-    static extern short GetAsyncKeyState(int vk);
-
     public KeyBox()
     {
         ReadOnly = true;
@@ -77,12 +73,163 @@ class KeyBox : TextBox
         if (k == Keys.None) return true;
 
         string s = "";
-        bool win = (GetAsyncKeyState(0x5B) & 0x8000) != 0 || (GetAsyncKeyState(0x5C) & 0x8000) != 0;
-        if (win) s += "Win+";
         if ((keyData & Keys.Control) != 0) s += "Ctrl+";
         if ((keyData & Keys.Alt) != 0) s += "Alt+";
         if ((keyData & Keys.Shift) != 0) s += "Shift+";
         Text = s + k.ToString();
         return true;
+    }
+}
+
+// Schalter (an/aus) mit Beschriftung
+class Toggle : Control
+{
+    bool on;
+    public event EventHandler CheckedChanged;
+
+    public bool Checked
+    {
+        get { return on; }
+        set
+        {
+            if (on == value) return;
+            on = value;
+            Invalidate();
+            if (CheckedChanged != null) CheckedChanged(this, EventArgs.Empty);
+        }
+    }
+
+    public Toggle()
+    {
+        SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
+        Cursor = Cursors.Hand;
+        Height = 26;
+        ForeColor = Color.White;
+        Font = new Font("Segoe UI", 10f);
+    }
+
+    protected override void OnClick(EventArgs e)
+    {
+        Checked = !on;
+        base.OnClick(e);
+    }
+
+    protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        g.Clear(Parent != null ? Parent.BackColor : Color.Black);
+
+        int w = 36, h = 20, y = (Height - h) / 2;
+        using (GraphicsPath p = new GraphicsPath())
+        {
+            p.AddArc(0, y, h, h, 90, 180);
+            p.AddArc(w - h, y, h, h, 270, 180);
+            p.CloseFigure();
+            using (SolidBrush b = new SolidBrush(on ? Color.FromArgb(29, 185, 84) : Color.FromArgb(74, 74, 74)))
+                g.FillPath(b, p);
+        }
+        g.FillEllipse(Brushes.White, on ? w - h + 3 : 3, y + 3, h - 6, h - 6);
+
+        using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap))
+        using (SolidBrush t = new SolidBrush(ForeColor))
+        {
+            sf.LineAlignment = StringAlignment.Center;
+            sf.Trimming = StringTrimming.EllipsisCharacter;
+            g.DrawString(Text, Font, t, new RectangleF(w + 12, 0, Width - w - 12, Height), sf);
+        }
+    }
+}
+
+// Schieberegler im selben Stil
+class Slider : Control
+{
+    int min = 0, max = 100, val = 50;
+    bool drag;
+    public event EventHandler ValueChanged;
+
+    public int Minimum { get { return min; } set { min = value; Invalidate(); } }
+    public int Maximum { get { return max; } set { max = value; Invalidate(); } }
+    public int Value
+    {
+        get { return val; }
+        set
+        {
+            int v = Math.Max(min, Math.Min(max, value));
+            if (v == val) return;
+            val = v;
+            Invalidate();
+            if (ValueChanged != null) ValueChanged(this, EventArgs.Empty);
+        }
+    }
+
+    public Slider()
+    {
+        SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
+        Cursor = Cursors.Hand;
+        Height = 24;
+    }
+
+    void FromX(int x)
+    {
+        double f = (x - 8) / (double)(Width - 16);
+        Value = min + (int)Math.Round(f * (max - min));
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e) { drag = true; FromX(e.X); base.OnMouseDown(e); }
+    protected override void OnMouseMove(MouseEventArgs e) { if (drag) FromX(e.X); base.OnMouseMove(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { drag = false; base.OnMouseUp(e); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(Parent != null ? Parent.BackColor : Color.Black);
+        float f = (val - min) / (float)(max - min);
+        float x = 8 + f * (Width - 16), cy = Height / 2f;
+        using (SolidBrush t = new SolidBrush(Color.FromArgb(70, 70, 70)))
+            g.FillRectangle(t, 8, cy - 2, Width - 16, 4);
+        using (SolidBrush b = new SolidBrush(Color.FromArgb(29, 185, 84)))
+            g.FillRectangle(b, 8, cy - 2, x - 8, 4);
+        g.FillEllipse(Brushes.White, x - 8, cy - 8, 16, 16);
+    }
+}
+
+// Eintrag in der Seitenleiste der Einstellungen
+class NavItem : Control
+{
+    bool sel, hover;
+
+    public bool Selected { get { return sel; } set { sel = value; Invalidate(); } }
+
+    public NavItem()
+    {
+        SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.ResizeRedraw, true);
+        Cursor = Cursors.Hand;
+        Height = 40;
+        Font = new Font("Segoe UI", 10.5f);
+    }
+
+    protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        Graphics g = e.Graphics;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        g.Clear(sel ? Color.FromArgb(34, 34, 34) : (hover ? Color.FromArgb(26, 26, 26) : Color.FromArgb(18, 18, 18)));
+        if (sel)
+            using (SolidBrush b = new SolidBrush(Color.FromArgb(29, 185, 84)))
+                g.FillRectangle(b, 0, 0, 3, Height);
+        using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap))
+        using (SolidBrush t = new SolidBrush(sel ? Color.White : Color.FromArgb(170, 170, 170)))
+        {
+            sf.LineAlignment = StringAlignment.Center;
+            g.DrawString(Text, Font, t, new RectangleF(20, 0, Width - 24, Height), sf);
+        }
     }
 }

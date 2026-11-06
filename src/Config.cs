@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 static class App
 {
-    public const string Version = "1.16";
+    public const string Version = "1.17";
 }
 
 // Einstellungen, liegen in der Registry unter HKCU\Software\SpotifyOverlay

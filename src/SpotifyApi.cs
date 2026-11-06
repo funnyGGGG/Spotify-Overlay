@@ -4,6 +4,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
+using System.Threading;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Win32;
@@ -56,13 +58,55 @@ static class SpotifyApi
         return Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');
     }
 
+    static string ReadBody(WebException ex)
+    {
+        try
+        {
+            if (ex.Response == null) return ex.Message;
+            using (StreamReader sr = new StreamReader(ex.Response.GetResponseStream())) return sr.ReadToEnd();
+        }
+        catch { return ex.Message; }
+    }
+
+    // Fehlertext aus der Antwort von Spotify zusammensetzen
+    static string Explain(int status, string body)
+    {
+        string msg = "";
+        try
+        {
+            object o = Json.Parse(body);
+            object err = Json.Get(o, "error");
+            if (err is string) msg = (string)err;
+            else msg = Json.Str(err, "message");
+            string desc = Json.Str(o, "error_description");
+            if (desc.Length > 0) msg = msg + " - " + desc;
+        }
+        catch { }
+        if (msg.Length == 0) msg = "HTTP " + status;
+        else msg = msg + " (HTTP " + status + ")";
+
+        string hint = "";
+        if (status == 401) hint = Lang.T("pl_h401");
+        else if (status == 403) hint = Lang.T("pl_h403");
+        else if (msg.ToLower().Contains("redirect") || msg.ToLower().Contains("client")) hint = Lang.T("pl_hredir");
+        return hint.Length > 0 ? msg + "\n" + hint : msg;
+    }
+
     static string Post(string url, string form)
     {
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
-        using (WebClient wc = new WebClient())
+        try
         {
-            wc.Headers[HttpRequestHeader.ContentType] = "application/x-www-form-urlencoded";
-            return wc.UploadString(url, form);
+            using (WebClient wc = new WebClient())
+            {
+                wc.Headers[HttpRequestHeader.ContentType] = "application/x-www-form-urlencoded";
+                return wc.UploadString(url, form);
+            }
+        }
+        catch (WebException ex)
+        {
+            HttpWebResponse r = ex.Response as HttpWebResponse;
+            throw new IOException(Explain(r == null ? 0 : (int)r.StatusCode, ReadBody(ex)));
         }
     }
 
@@ -76,7 +120,23 @@ static class SpotifyApi
         if (refresh.Length > 0) SaveRefresh(refresh);
     }
 
-    // Oeffnet den Browser, wartet auf die Rueckkehr und holt die Tokens (blockiert, im Hintergrund aufrufen)
+    static string Query(string line, string key)
+    {
+        int q = line.IndexOf('?');
+        if (q < 0) return null;
+        string rest = line.Substring(q + 1);
+        int sp = rest.IndexOf(' ');
+        if (sp >= 0) rest = rest.Substring(0, sp);
+        foreach (string part in rest.Split('&'))
+        {
+            int eq = part.IndexOf('=');
+            if (eq > 0 && part.Substring(0, eq) == key) return Uri.UnescapeDataString(part.Substring(eq + 1).Replace('+', ' '));
+        }
+        return null;
+    }
+
+    // Oeffnet den Browser, wartet auf die Rueckkehr und holt die Tokens (blockiert, im Hintergrund aufrufen).
+    // Eigener kleiner Server auf 127.0.0.1:8898 - braucht keine Administrator-Rechte.
     public static void Login(string clientId)
     {
         byte[] rnd = new byte[48];
@@ -85,9 +145,10 @@ static class SpotifyApi
         string challenge;
         using (SHA256 sha = SHA256.Create()) challenge = Base64Url(sha.ComputeHash(Encoding.ASCII.GetBytes(verifier)));
 
-        HttpListener l = new HttpListener();
-        l.Prefixes.Add("http://127.0.0.1:8898/");
-        l.Start();
+        TcpListener l = new TcpListener(IPAddress.Loopback, 8898);
+        try { l.Start(); }
+        catch (SocketException) { throw new IOException(Lang.T("pl_hport")); }
+
         try
         {
             string url = "https://accounts.spotify.com/authorize?response_type=code&client_id=" + Uri.EscapeDataString(clientId) +
@@ -95,19 +156,29 @@ static class SpotifyApi
                          "&code_challenge_method=S256&code_challenge=" + challenge;
             Process.Start(url);
 
-            IAsyncResult ar = l.BeginGetContext(null, null);
-            if (!ar.AsyncWaitHandle.WaitOne(180000)) throw new IOException("login timed out");
-            HttpListenerContext ctx = l.EndGetContext(ar);
-            string code = ctx.Request.QueryString["code"];
-            string err = ctx.Request.QueryString["error"];
-
-            byte[] page = Encoding.UTF8.GetBytes("<html><body style='font-family:sans-serif;background:#121212;color:#fff;text-align:center;padding-top:80px'><h2>Spotify Overlay</h2><p>" +
-                                                 (code != null ? "Connected. You can close this tab." : "Login failed.") + "</p></body></html>");
-            ctx.Response.ContentType = "text/html; charset=utf-8";
-            ctx.Response.OutputStream.Write(page, 0, page.Length);
-            ctx.Response.Close();
-
-            if (code == null) throw new IOException(err ?? "login failed");
+            string code = null, err = null;
+            DateTime end = DateTime.Now.AddSeconds(180);
+            while (DateTime.Now < end && code == null && err == null)
+            {
+                if (!l.Pending()) { Thread.Sleep(100); continue; }
+                using (TcpClient c = l.AcceptTcpClient())
+                {
+                    c.ReceiveTimeout = 3000;
+                    NetworkStream ns = c.GetStream();
+                    byte[] buf = new byte[8192];
+                    int n = 0;
+                    try { n = ns.Read(buf, 0, buf.Length); } catch { }
+                    if (n <= 0) continue;
+                    string req = Encoding.ASCII.GetString(buf, 0, n);
+                    string first = req.Split('\n')[0];
+                    code = Query(first, "code");
+                    err = Query(first, "error");
+                    if (code == null && err == null) { Reply(ns, "..."); continue; }
+                    Reply(ns, code != null ? "Connected. You can close this tab and go back to the overlay." : "Login failed: " + err);
+                }
+            }
+            if (err != null) throw new IOException(err + "\n" + Lang.T("pl_hredir"));
+            if (code == null) throw new IOException("login timed out\n" + Lang.T("pl_hredir"));
 
             string form = "grant_type=authorization_code&code=" + Uri.EscapeDataString(code) +
                           "&redirect_uri=" + Uri.EscapeDataString(Redirect) + "&client_id=" + Uri.EscapeDataString(clientId) +
@@ -115,6 +186,16 @@ static class SpotifyApi
             TakeToken(Post("https://accounts.spotify.com/api/token", form));
         }
         finally { l.Stop(); }
+    }
+
+    static void Reply(NetworkStream ns, string text)
+    {
+        string html = "<html><body style='font-family:Segoe UI,sans-serif;background:#121212;color:#fff;text-align:center;padding-top:90px'><h2>Spotify Overlay</h2><p>" + text + "</p></body></html>";
+        byte[] body = Encoding.UTF8.GetBytes(html);
+        byte[] head = Encoding.ASCII.GetBytes("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nContent-Length: " + body.Length + "\r\n\r\n");
+        ns.Write(head, 0, head.Length);
+        ns.Write(body, 0, body.Length);
+        ns.Flush();
     }
 
     static string Token()
@@ -128,6 +209,18 @@ static class SpotifyApi
     }
 
     static string Call(string method, string url, string body, out int status)
+    {
+        string result = Send(method, url, body, out status);
+        if (status == 401)
+        {
+            // Token abgelaufen: einmal neu holen und wiederholen
+            accessToken = "";
+            result = Send(method, url, body, out status);
+        }
+        return result;
+    }
+
+    static string Send(string method, string url, string body, out int status)
     {
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
         HttpWebRequest rq = (HttpWebRequest)WebRequest.Create(url);
@@ -156,7 +249,7 @@ static class SpotifyApi
         catch (WebException ex)
         {
             HttpWebResponse r = ex.Response as HttpWebResponse;
-            if (r == null) throw;
+            if (r == null) throw new IOException(ex.Message);
             status = (int)r.StatusCode;
             using (StreamReader sr = new StreamReader(r.GetResponseStream())) return sr.ReadToEnd();
         }
@@ -171,7 +264,7 @@ static class SpotifyApi
         {
             int st;
             string json = Call("GET", "https://api.spotify.com/v1/me/playlists?limit=50&offset=" + offset, null, out st);
-            if (st != 200) throw new IOException(Json.Str(Json.Get(Json.Parse(json), "error"), "message"));
+            if (st != 200) throw new IOException(Explain(st, json));
             List<object> items = Json.Get(Json.Parse(json), "items") as List<object>;
             if (items == null || items.Count == 0) break;
             foreach (object it in items)

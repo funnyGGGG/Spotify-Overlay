@@ -124,7 +124,9 @@ class TaskbarHost : Form
 class Overlay : Form
 {
     [DllImport("user32.dll")]
-    static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetClassName(IntPtr h, StringBuilder sb, int max);
     delegate bool EnumProc(IntPtr h, IntPtr l);
     [DllImport("user32.dll")]
     static extern bool EnumWindows(EnumProc p, IntPtr l);
@@ -137,7 +139,7 @@ class Overlay : Form
     [DllImport("gdi32.dll")]
     static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
 
-    const byte VK_NEXT = 0xB0, VK_PREV = 0xB1, VK_PLAY = 0xB3;
+    const int CMD_NEXT = 11, CMD_PREV = 12, CMD_PLAY = 14;   // APPCOMMAND-Werte
     const float BaseW = 352f;
     static readonly int[] BtnX = { 228, 252, 276 };
     static readonly string[] AdWords = { "advertisement", "werbung", "anuncio", "publicidad", "publicité", "publicite", "pubblicità", "pubblicita", "reclame" };
@@ -164,6 +166,8 @@ class Overlay : Form
     readonly object stateLock = new object();
     string wFound = null;
     bool wRunning = false, wAd = false;
+    IntPtr wHwnd = IntPtr.Zero;
+    DateTime volHold = DateTime.MinValue;   // so lange den Wert vom Hintergrund ignorieren (nach Ziehen am Regler)
     float wVol = -1f;
 
     // Zustand
@@ -199,16 +203,18 @@ class Overlay : Form
 
     protected override bool ShowWithoutActivation { get { return true; } }
 
-    static void Key(byte vk)
+    // Befehl direkt an das Spotify-Fenster schicken: sofort und nur fuer Spotify (nicht fuer YouTube & Co).
+    // Gibt es das Fenster nicht, wird die Windows-Mediensitzung von Spotify benutzt.
+    void Cmd(string name, int appCommand)
     {
-        keybd_event(vk, 0, 0, UIntPtr.Zero);
-        keybd_event(vk, 0, 2, UIntPtr.Zero);
-    }
-
-    // Befehl nur an Spotify schicken (nicht an YouTube & Co). Medientaste nur, wenn die Windows-Funktion fehlt.
-    void Cmd(string name, byte vk)
-    {
-        ThreadPool.QueueUserWorkItem(delegate { if (Media.Command(name) == 2) Key(vk); });
+        IntPtr h;
+        lock (stateLock) { h = wHwnd; }
+        if (h != IntPtr.Zero)
+        {
+            PostMessage(h, 0x0319, h, (IntPtr)(appCommand << 16));   // WM_APPCOMMAND
+            return;
+        }
+        if (running) ThreadPool.QueueUserWorkItem(delegate { Media.Command(name); });
     }
 
     // ---------- Bilder ----------
@@ -337,6 +343,7 @@ class Overlay : Form
                 bool r = pids.Count > 0;
                 string found = null;
                 bool ad = false;
+                IntPtr main = IntPtr.Zero;
                 if (r)
                 {
                     EnumWindows(delegate(IntPtr h, IntPtr l)
@@ -346,8 +353,12 @@ class Overlay : Form
                         StringBuilder sb = new StringBuilder(256);
                         GetWindowText(h, sb, 256);
                         string t = sb.ToString();
+                        StringBuilder cn = new StringBuilder(64);
+                        GetClassName(h, cn, 64);
+                        string cls = cn.ToString();
+                        if (t.Length > 0 && cls.StartsWith("Chrome_WidgetWin") && (main == IntPtr.Zero || cls == "Chrome_WidgetWin_0")) main = h;
                         if (Array.IndexOf(AdWords, t.Trim().ToLower()) >= 0) { ad = true; return true; }
-                        if (t.Contains(" - ")) { found = t; return false; }
+                        if (t.Contains(" - ")) { found = t; return true; }
                         return true;
                     }, IntPtr.Zero);
                 }
@@ -356,6 +367,7 @@ class Overlay : Form
                 lock (stateLock)
                 {
                     wRunning = r;
+                    wHwnd = main;
                     wFound = found;
                     wAd = ad && found == null;
                     if (Config.Volume && n % 2 == 0 && !volDrag) wVol = v;
@@ -429,7 +441,7 @@ class Overlay : Form
         // Update-Suche: 20 Sekunden nach dem Start, dann alle 6 Stunden
         System.Windows.Forms.Timer upd = new System.Windows.Forms.Timer();
         upd.Interval = 20000;
-        upd.Tick += delegate { upd.Interval = 6 * 3600 * 1000; StartUpdateCheck(false); };
+        upd.Tick += delegate { upd.Interval = 6 * 3600 * 1000; StartUpdateCheck(false, null); };
         upd.Start();
 
         Thread w = new Thread(WorkerLoop);
@@ -449,7 +461,7 @@ class Overlay : Form
         m.Items.Add(Lang.T("tray_toggle"), null, delegate { TaskbarClick(); });
         m.Items.Add(Lang.T("tray_playlists"), null, delegate { OpenPlaylists(); });
         m.Items.Add(Lang.T("tray_settings"), null, delegate { OpenSettings(); });
-        m.Items.Add(Lang.T("tray_update"), null, delegate { StartUpdateCheck(true); });
+        m.Items.Add(Lang.T("tray_update"), null, delegate { StartUpdateCheck(true, null); });
         m.Items.Add(new ToolStripSeparator());
         m.Items.Add(Lang.T("tray_exit"), null, delegate { ExitAll(); });
         tray.ContextMenuStrip = m;
@@ -488,17 +500,31 @@ class Overlay : Form
         try { BeginInvoke(new Action(delegate { tray.ShowBalloonTip(4000, "Spotify Overlay", text, ToolTipIcon.Info); })); } catch { }
     }
 
-    void StartUpdateCheck(bool manual)
+    // Aus den Einstellungen: Ergebnis kommt als Text zurueck
+    public void CheckForUpdates(Action<string> report)
+    {
+        StartUpdateCheck(true, report);
+    }
+
+    void StartUpdateCheck(bool manual, Action<string> report)
     {
         Thread t = new Thread(delegate()
         {
+            // Rueckmeldung nur bei manueller Suche: in den Einstellungen als Text, sonst als Sprechblase
+            Action<string> say = delegate(string text)
+            {
+                if (!manual) return;
+                if (report == null) { Balloon(text); return; }
+                try { BeginInvoke(new Action(delegate { report(text); })); } catch { }
+            };
             try
             {
-                if (!Updater.Configured) { if (manual) Balloon(Lang.T("upd_norepo")); return; }
+                if (!Updater.Configured) { say(Lang.T("upd_norepo")); return; }
                 UpdateInfo info;
-                if (!Updater.Latest(out info)) { if (manual) Balloon(Lang.T("upd_fail")); return; }
+                if (!Updater.Latest(out info)) { say(Lang.T("upd_fail")); return; }
                 if (info.Ver > Updater.Current)
                 {
+                    say(Lang.T("upd_avail", info.Ver));
                     BeginInvoke(new Action(delegate
                     {
                         if (updateWin != null && !updateWin.IsDisposed) return;
@@ -506,9 +532,9 @@ class Overlay : Form
                         updateWin.Show();
                     }));
                 }
-                else if (manual) Balloon(Lang.T("upd_none"));
+                else say(Lang.T("upd_none"));
             }
-            catch { if (manual) Balloon(Lang.T("upd_fail")); }
+            catch { say(Lang.T("upd_fail")); }
         });
         t.IsBackground = true;
         t.Start();
@@ -758,7 +784,7 @@ class Overlay : Form
                 resizeStartX = Cursor.Position.X;
                 resizeStartScale = scale;
             }
-            else if (Config.Volume && vol >= 0 && VolRect().Contains(e.Location))
+            else if (Config.Volume && VolRect().Contains(e.Location))
             {
                 volDrag = true;
                 SetVolFromX(e.X);
@@ -798,7 +824,7 @@ class Overlay : Form
             int h = HitBtn(e.Location);
             if (h != hoverBtn) { hoverBtn = h; Invalidate(); }
             if (GripRect().Contains(e.Location)) Cursor = Cursors.SizeNWSE;
-            else if (h >= 0 || (Config.Volume && vol >= 0 && VolRect().Contains(e.Location)) || (durSec > 0 && !isAd && SeekRect().Contains(e.Location)))
+            else if (h >= 0 || (Config.Volume && VolRect().Contains(e.Location)) || (durSec > 0 && !isAd && SeekRect().Contains(e.Location)))
                 Cursor = Cursors.Hand;
             else Cursor = Cursors.Default;
         }
@@ -809,9 +835,9 @@ class Overlay : Form
     {
         if (pressedBtn >= 0 && HitBtn(e.Location) == pressedBtn)
         {
-            if (pressedBtn == 0) Cmd("prev", VK_PREV);
-            else if (pressedBtn == 1) Cmd("play", VK_PLAY);
-            else if (pressedBtn == 2) Cmd("next", VK_NEXT);
+            if (pressedBtn == 0) Cmd("prev", CMD_PREV);
+            else if (pressedBtn == 1) Cmd("play", CMD_PLAY);
+            else if (pressedBtn == 2) Cmd("next", CMD_NEXT);
             else if (pressedBtn == 3) OpenPlaylists();
             else OpenSettings();
         }
@@ -830,6 +856,7 @@ class Overlay : Form
             dragging = false;
             SavePosition();
         }
+        if (volDrag) volHold = DateTime.Now.AddSeconds(4);   // Wert vom Hintergrund erst spaeter wieder uebernehmen
         volDrag = false;
         base.OnMouseUp(e);
     }
@@ -868,9 +895,9 @@ class Overlay : Form
     {
         if (id == 1) ChangeVol(0.05f);
         else if (id == 2) ChangeVol(-0.05f);
-        else if (id == 3) Cmd("next", VK_NEXT);
-        else if (id == 4) Cmd("prev", VK_PREV);
-        else if (id == 5) Cmd("play", VK_PLAY);
+        else if (id == 3) Cmd("next", CMD_NEXT);
+        else if (id == 4) Cmd("prev", CMD_PREV);
+        else if (id == 5) Cmd("play", CMD_PLAY);
         else if (id == 6) TaskbarClick();
     }
 
@@ -887,6 +914,7 @@ class Overlay : Form
                 BeginInvoke(new Action(delegate
                 {
                     vol = v;
+                    volHold = DateTime.Now.AddSeconds(4);
                     Invalidate();
                     if (Config.Popup) ShowPopup();
                 }));
@@ -1011,7 +1039,7 @@ class Overlay : Form
             ts.Start();
         }
 
-        if (Config.Volume && !volDrag && Math.Abs(v - vol) > 0.001f) { vol = v; changed = true; }
+        if (Config.Volume && !volDrag && DateTime.Now > volHold && Math.Abs(v - vol) > 0.001f) { vol = v; changed = true; }
 
         string key = isAd ? "ad" : (playing ? trackTitle : lastKey);
         if (playing && key != lastKey)
@@ -1029,7 +1057,7 @@ class Overlay : Form
 
         if (changed) Invalidate();
 
-        rpc.Update(Config.Discord, (Config.DiscordId ?? "").Trim(), trackTitle, trackArtist, playing && !isAd, posSec, durSec, running && hasSong && !isAd);
+        rpc.Update(Config.Discord, DiscordRpc.EffectiveId(Config.DiscordId), trackTitle, trackArtist, playing && !isAd, posSec, durSec, running && hasSong && !isAd);
     }
 
     [STAThread]

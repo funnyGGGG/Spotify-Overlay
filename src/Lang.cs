@@ -35,7 +35,7 @@ static class Lang
         A("hk_prev", "Previous song", "Vorheriger Song");
         A("hk_play", "Play / pause", "Play / Pause");
         A("hk_toggle", "Show / hide overlay", "Overlay ein-/ausblenden");
-        A("hk_hint", "Click a box and press any key (with or without Ctrl/Alt/Shift/Win). Backspace clears it.", "In ein Feld klicken und eine beliebige Taste drücken (mit oder ohne Strg/Alt/Umschalt/Win). Rücktaste löscht.");
+        A("hk_hint", "Click a box and press any key (with or without Ctrl/Alt/Shift). Backspace clears it.", "In ein Feld klicken und eine beliebige Taste drücken (mit oder ohne Strg/Alt/Umschalt). Rücktaste löscht.");
         // neu in 1.7
         A("ad_title", "Advertisement", "Werbung");
         A("tray_playlists", "Playlists", "Playlists");
@@ -64,6 +64,38 @@ static class Lang
         A("upd_inst", "Installing ...", "Installiere ...");
         A("upd_notes", "What's new", "Neuigkeiten");
         A("sub_update", "Updating to version {0}", "Aktualisiere auf Version {0}");
+        // neu in 1.17 bis 1.21
+        A("pl_h401", "Your Spotify login expired. Click Disconnect and connect again.", "Deine Spotify-Anmeldung ist abgelaufen. Auf Trennen klicken und neu verbinden.");
+        A("pl_h403", "Spotify says this account is not allowed. In your Spotify app on developer.spotify.com/dashboard open Settings -> User Management and add your Spotify e-mail address.", "Spotify sagt, dieses Konto ist nicht erlaubt. In deiner Spotify-App auf developer.spotify.com/dashboard unter Settings -> User Management deine Spotify-E-Mail-Adresse eintragen.");
+        A("pl_hredir", "Check that the Redirect URI in your Spotify app is exactly http://127.0.0.1:8898/callback and that the Client ID is correct.", "Prüfe, ob die Redirect URI in deiner Spotify-App genau http://127.0.0.1:8898/callback lautet und die Client-ID stimmt.");
+        A("pl_hport", "Port 8898 is already in use. Close other programs that use it and try again.", "Port 8898 wird schon benutzt. Schließe andere Programme, die ihn nutzen, und versuche es erneut.");
+        A("tab_general", "General", "Allgemein");
+        A("tab_controls", "Controls", "Steuerung");
+        A("tab_connections", "Connections", "Verbindungen");
+        A("tab_updates", "Updates", "Updates");
+        A("tab_help", "Help & Contact", "Hilfe & Kontakt");
+        A("grp_discord", "Discord activity", "Discord-Aktivität");
+        A("grp_spotify", "Spotify playlists", "Spotify-Playlists");
+        A("set_version", "Installed version: {0}", "Installierte Version: {0}");
+        A("set_check", "Check for updates", "Nach Updates suchen");
+        A("set_checking", "Checking ...", "Suche läuft ...");
+        A("set_repo", "Updates come from: github.com/{0}", "Updates kommen von: github.com/{0}");
+        A("set_norepo", "No update source set in this build.", "In dieser Version ist keine Update-Quelle eingestellt.");
+        A("set_contact", "Questions, bugs or ideas? Join our Discord!", "Fragen, Fehler oder Ideen? Komm auf unseren Discord!");
+        A("set_discord_btn", "Join the Discord", "Zum Discord");
+        A("set_github_btn", "GitHub page", "GitHub-Seite");
+        A("set_nodiscord", "The Discord link has not been set yet.", "Der Discord-Link ist noch nicht eingestellt.");
+        A("set_copy", "Copy", "Kopieren");
+        A("set_copied", "Copied", "Kopiert");
+        A("step_setup", "Setup", "Einrichtung");
+        A("step_install", "Installing", "Installation");
+        A("step_done", "Finished", "Fertig");
+        A("head_install", "Install Spotify Overlay", "Spotify Overlay installieren");
+        A("head_update", "Updating Spotify Overlay", "Spotify Overlay wird aktualisiert");
+        A("head_uninstall", "Remove Spotify Overlay", "Spotify Overlay entfernen");
+        A("head_working", "Please wait", "Bitte warten");
+        A("lbl_version", "Version {0}", "Version {0}");
+
 
 
         // Einstellungen
@@ -73,7 +105,7 @@ static class Lang
         A("set_popup", "Only show as popup when the song changes", "Nur als Popup bei Songwechsel");
         A("set_volume", "Show Spotify volume slider", "Spotify-Lautstärkeregler anzeigen");
         A("set_discord", "Show music in Discord activity", "Musik in der Discord-Aktivität anzeigen");
-        A("set_discordid", "Discord application ID", "Discord-Anwendungs-ID");
+        A("set_discordid", "Own Discord application ID (optional - leave empty to use the built-in one)", "Eigene Discord-Anwendungs-ID (optional - leer lassen für die eingebaute)");
         A("set_update", "Install updates automatically", "Updates automatisch installieren");
         A("set_auto", "Start with Windows", "Mit Windows starten");
         A("set_tip", "Tip: drag the bottom-right corner of the overlay to resize it.", "Tipp: Zum Ändern der Größe die untere rechte Ecke des Overlays ziehen.");
