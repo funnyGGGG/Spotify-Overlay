@@ -19,6 +19,12 @@ jobs:
           $c = Get-Content src/Config.cs -Raw
           $c = $c -replace 'Version = "[0-9.]+"', ('Version = "' + $v + '"')
           Set-Content src/Config.cs $c
+          $p = [System.Collections.ArrayList]($v.Split('.'))
+          while ($p.Count -lt 4) { [void]$p.Add('0') }
+          $four = $p -join '.'
+          $a = Get-Content src/AssemblyInfo.cs -Raw
+          $a = $a -replace 'Version\("[0-9.]+"\)', ('Version("' + $four + '")')
+          Set-Content src/AssemblyInfo.cs $a
           Set-Content assets/repo.txt "${{ github.repository }}"
 
       - name: Build
@@ -27,10 +33,14 @@ jobs:
           mkdir build
           set CSC=%WINDIR%\Microsoft.NET\Framework64\v4.0.30319\csc.exe
           set REFS=/r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:System.Security.dll /r:Microsoft.CSharp.dll
-          "%CSC%" /nologo /target:winexe /optimize+ /codepage:65001 /win32icon:assets\SpotifyOverlay.ico /resource:assets\cover.png,cover.png /resource:assets\repo.txt,repo.txt %REFS% /out:build\SpotifyOverlay.exe src\Overlay.cs src\Settings.cs src\Lang.cs src\Config.cs src\UI.cs src\Audio.cs src\Discord.cs src\Updater.cs src\HotKeys.cs src\Media.cs src\Json.cs src\SpotifyApi.cs src\Playlists.cs src\UpdateWindow.cs src\Help.cs
-          "%CSC%" /nologo /target:winexe /optimize+ /codepage:65001 /win32icon:assets\SpotifyOverlay.ico /resource:build\SpotifyOverlay.exe,payload.exe /resource:assets\cover.png,cover.png %REFS% /out:build\SpotifyOverlay_Setup.exe installer\Setup.cs src\Lang.cs src\Config.cs src\UI.cs
+          set OPTS=/nologo /target:winexe /optimize+ /codepage:65001 /win32icon:assets\SpotifyOverlay.ico /win32manifest:assets\app.manifest
+          "%CSC%" %OPTS% /resource:assets\cover.png,cover.png /resource:assets\repo.txt,repo.txt /resource:assets\discord.txt,discord.txt /resource:assets\discord_app.txt,discord_app.txt %REFS% /out:build\SpotifyOverlay.exe src\Overlay.cs src\Settings.cs src\Lang.cs src\Config.cs src\UI.cs src\Audio.cs src\Discord.cs src\Updater.cs src\HotKeys.cs src\Media.cs src\Json.cs src\SpotifyApi.cs src\Playlists.cs src\UpdateWindow.cs src\Help.cs src\Contact.cs src\AssemblyInfo.cs
+          "%CSC%" %OPTS% /resource:build\SpotifyOverlay.exe,payload.exe /resource:assets\cover.png,cover.png %REFS% /out:build\SpotifyOverlay_Setup.exe installer\Setup.cs src\Lang.cs src\Config.cs src\UI.cs src\AssemblyInfo.cs
+          certutil -hashfile build\SpotifyOverlay_Setup.exe SHA256 > build\SHA256.txt
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: build/SpotifyOverlay_Setup.exe
+          files: |
+            build/SpotifyOverlay_Setup.exe
+            build/SHA256.txt
