@@ -14,7 +14,10 @@ Ein kleines Overlay für Windows, das immer im Vordergrund zeigt, was gerade auf
 - Auf den Fortschrittsbalken klicken oder ziehen, um im Song vorzuspulen
 - Lautstärkeregler, der nur die Lautstärke von Spotify ändert
 - Zeigt Werbung an (mit dem Werbebild, wenn Spotify eins liefert)
-- Deine Spotify-Playlists mit einem Klick (optional, braucht eine kostenlose Spotify-Entwickler-App)
+- Songtext-Fenster, das dem Lied Zeile für Zeile folgt
+- Deine Spotify-Playlists mit einem Klick (optional, braucht eine kostenlose Spotify-Entwickler-App; ohne Premium wird die Playlist in Spotify geöffnet)
+- Durchklickbar-Modus, damit Klicks im Spiel das Overlay nicht treffen
+- Willkommens-Tour beim ersten Start
 - Globale Tastenkürzel - jede Taste geht (Lautstärke, Weiter, Play/Pause, Ein-/Ausblenden)
 - Mit der Maus verschieben, an der unteren rechten Ecke die Größe ziehen
 - Taskleisten-Button mit Live-Vorschau (auch bei Alt+Tab), Tray-Symbol, Einstellungen
@@ -47,7 +50,7 @@ Windows SmartScreen kann bei nicht signierten Programmen warnen. Auf "Weitere In
 In den Einstellungen gibt es einen Button **Hilfe / Anleitung** mit all dem und den Einrichtungsschritten unten.
 
 ## Discord-Aktivität
-In den Einstellungen (*Verbindungen*) einschalten. Discord zeigt dann, welchen Song du hörst und wie lange er noch läuft. Du kannst es jederzeit ausschalten. Die Discord-Desktop-App muss laufen und in Discord muss *Aktuelle Aktivität anzeigen* an sein. Die Statuszeile in den Einstellungen zeigt Fehler.
+In den Einstellungen (*Verbindungen*) einschalten. Discord zeigt dann, welchen Song du hörst, das Cover und wie lange er noch läuft. Bei Pause steht dort Pausiert. Du kannst es jederzeit ausschalten. Die Discord-Desktop-App muss laufen und in Discord muss *Aktuelle Aktivität anzeigen* an sein. Die Statuszeile in den Einstellungen zeigt Fehler.
 
 ## Playlists (optional)
 1. Öffne https://developer.spotify.com/dashboard und erstelle eine App.
@@ -65,10 +68,13 @@ Die App prüft das neueste GitHub-Release und zeigt ein Update-Fenster mit den �
 ## Selbst bauen
 Führe `build.bat` unter Windows aus. Es nutzt den C#-Compiler, der in Windows steckt, und legt den Installer in deinen Downloads-Ordner.
 
-Neue Version veröffentlichen: ein Release mit einem Tag wie `v1.18` erstellen. GitHub baut den Installer und hängt ihn an.
+Neue Version veröffentlichen: ein Release mit einem Tag wie `v1.19` erstellen. GitHub baut den Installer und hängt ihn an.
 
 ## Lizenz
 MIT
+
+## Internetzugriffe
+Das Overlay geht nur online für: die Update-Suche (GitHub), die Songtext-Suche bei geöffnetem Songtext-Fenster (lrclib.net), das Album-Cover in der Discord-Aktivität (iTunes-Suche, abschaltbar), deine Spotify-Playlists, wenn du sie verbindest, und Discord auf deinem eigenen PC. Sonst wird nichts gesendet.
 
 ## Hilfe und Kontakt
 Fragen, Fehler oder Ideen? Komm auf den Discord: https://discord.gg/QfxEnH2gN9

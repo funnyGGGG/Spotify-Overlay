@@ -14,7 +14,10 @@ A small always-on-top overlay for Windows that shows what is playing on Spotify.
 - Click or drag the progress bar to skip within a song
 - Volume slider that only changes Spotify's volume
 - Shows ads (with the ad picture when Spotify provides one)
-- Your Spotify playlists with one click (optional, needs a free Spotify developer app)
+- Lyrics window that follows the song line by line
+- Your Spotify playlists with one click (optional, needs a free Spotify developer app; without Premium the playlist opens in Spotify)
+- Click-through mode so clicks in a game do not hit the overlay
+- Welcome tour on the first start
 - Global keybinds - every key works (volume, skip, play/pause, show/hide)
 - Drag to move, drag the bottom-right corner to resize
 - Taskbar button with a live preview (also in Alt+Tab), tray icon, settings window with tabs
@@ -47,7 +50,7 @@ Windows SmartScreen may warn about unsigned programs. Click "More info" and then
 The settings window has a **Help / Tutorial** button with all of this and the setup steps below.
 
 ## Discord activity
-Switch it on in the settings (*Connections*). Discord then shows which song you are listening to and how long it runs. You can turn it off any time. The Discord desktop app must be running and *Display current activity* must be on in Discord. The status line in the settings shows errors.
+Switch it on in the settings (*Connections*). Discord then shows which song you are listening to, the cover and how long it runs. It shows Paused when you pause. You can turn it off any time. The Discord desktop app must be running and *Display current activity* must be on in Discord. The status line in the settings shows errors.
 
 ## Playlists (optional)
 1. Go to https://developer.spotify.com/dashboard and create an app.
@@ -65,10 +68,13 @@ The app checks the latest GitHub release and shows an update window with the cha
 ## Build
 Run `build.bat` on Windows. It uses the C# compiler that comes with Windows and puts the installer into your Downloads folder.
 
-To publish a new version: create a release with a tag like `v1.18`. GitHub builds the installer and attaches it.
+To publish a new version: create a release with a tag like `v1.19`. GitHub builds the installer and attaches it.
 
 ## License
 MIT
+
+## Network use
+The overlay only goes online for: the update check (GitHub), the lyrics lookup while the lyrics window is open (lrclib.net), the album cover in the Discord activity (iTunes search, can be switched off), your Spotify playlists if you connect them, and Discord on your own PC. Nothing else is sent.
 
 ## Help and contact
 Questions, bugs or ideas? Join the Discord: https://discord.gg/QfxEnH2gN9
