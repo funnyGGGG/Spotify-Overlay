@@ -144,7 +144,11 @@ class PlaylistForm : Form
         string id = ids[i];
         Thread t = new Thread(delegate()
         {
-            try { Say(SpotifyApi.Play(id) ? Lang.T("pl_started") : Lang.T("pl_opened")); }
+            try
+            {
+                int r = SpotifyApi.Play(id);
+                Say(r == 0 ? Lang.T("pl_started") : (r == 1 ? Lang.T("pl_free") : Lang.T("pl_opened")));
+            }
             catch (Exception ex) { Say(Lang.T("pl_err", ex.Message)); }
         });
         t.IsBackground = true;

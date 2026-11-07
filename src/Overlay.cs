@@ -125,6 +125,10 @@ class Overlay : Form
 {
     [DllImport("user32.dll")]
     static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
+    static extern int GetWindowLong(IntPtr h, int index);
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
+    static extern int SetWindowLong(IntPtr h, int index, int value);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     static extern int GetClassName(IntPtr h, StringBuilder sb, int max);
     delegate bool EnumProc(IntPtr h, IntPtr l);
@@ -140,8 +144,8 @@ class Overlay : Form
     static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
 
     const int CMD_NEXT = 11, CMD_PREV = 12, CMD_PLAY = 14;   // APPCOMMAND-Werte
-    const float BaseW = 352f;
-    static readonly int[] BtnX = { 228, 252, 276 };
+    const float BaseW = 376f;
+    static readonly int[] BtnX = { 226, 250, 274 };
     static readonly string[] AdWords = { "advertisement", "werbung", "anuncio", "publicidad", "publicité", "publicite", "pubblicità", "pubblicita", "reclame" };
     static readonly Color BG = Color.FromArgb(24, 24, 24);
     static readonly Color GREEN = Color.FromArgb(29, 185, 84);
@@ -153,6 +157,12 @@ class Overlay : Form
     SettingsForm settings;
     PlaylistForm playlists;
     UpdateForm updateWin;
+    LyricsForm lyrics;
+    bool clickThrough = false;
+    AutoResetEvent wake = new AutoResetEvent(false);   // weckt den Hintergrund-Thread sofort
+    DateTime fastUntil = DateTime.MinValue;            // bis dahin haeufiger abfragen (nach einem Klick)
+    DateTime holdPlayUntil = DateTime.MinValue;
+    DateTime nextVol = DateTime.MinValue;
     Icon appIcon;
     Image cover;
     Bitmap coverScaled;
@@ -167,6 +177,9 @@ class Overlay : Form
     string wFound = null;
     bool wRunning = false, wAd = false;
     IntPtr wHwnd = IntPtr.Zero;
+    bool wSmtc = false;
+    string wTitle = "", wArtist = "";
+    int wStatus = -1;
     DateTime volHold = DateTime.MinValue;   // so lange den Wert vom Hintergrund ignorieren (nach Ziehen am Regler)
     float wVol = -1f;
 
@@ -207,6 +220,16 @@ class Overlay : Form
     // Gibt es das Fenster nicht, wird die Windows-Mediensitzung von Spotify benutzt.
     void Cmd(string name, int appCommand)
     {
+        // Anzeige sofort umschalten, der echte Zustand kommt gleich hinterher
+        if (name == "play" && !isAd)
+        {
+            playing = !playing;
+            holdPlayUntil = DateTime.Now.AddSeconds(1.5);
+            Invalidate();
+        }
+        fastUntil = DateTime.Now.AddSeconds(4);
+        wake.Set();
+
         IntPtr h;
         lock (stateLock) { h = wHwnd; }
         if (h != IntPtr.Zero)
@@ -333,7 +356,7 @@ class Overlay : Form
     // Laeuft im Hintergrund, damit die Oberflaeche nie ruckelt
     void WorkerLoop()
     {
-        int n = 0;
+        int n = 0, fails = 0;
         while (!Exiting)
         {
             try
@@ -362,20 +385,34 @@ class Overlay : Form
                         return true;
                     }, IntPtr.Zero);
                 }
+                // Titel, Interpret und Spielt/Pause aus der Windows-Mediensitzung von Spotify
+                string st = "", sa = "";
+                int sstat = -1;
+                bool sok = false;
+                if (r && (fails < 4 || n % 10 == 0))
+                {
+                    try { sok = Media.GetState(out st, out sa, out sstat); fails = 0; }
+                    catch { fails++; }
+                }
                 float v = -1f;
-                if (Config.Volume && !volDrag && n % 2 == 0) v = SpotifyAudio.Get();
+                bool readVol = Config.Volume && !volDrag && DateTime.Now >= nextVol;
+                if (readVol) { v = SpotifyAudio.Get(); nextVol = DateTime.Now.AddSeconds(2); }
                 lock (stateLock)
                 {
                     wRunning = r;
+                    wSmtc = sok;
+                    wTitle = st;
+                    wArtist = sa;
+                    wStatus = sstat;
                     wHwnd = main;
                     wFound = found;
                     wAd = ad && found == null;
-                    if (Config.Volume && n % 2 == 0 && !volDrag) wVol = v;
+                    if (readVol) wVol = v;
                 }
             }
             catch { }
             n++;
-            Thread.Sleep(1000);
+            wake.WaitOne(DateTime.Now < fastUntil ? 250 : 1000);
         }
     }
 
@@ -399,7 +436,7 @@ class Overlay : Form
         BackColor = BG;
         StartPosition = FormStartPosition.Manual;
         scale = Config.Scale / 100f;
-        Opacity = Config.Opacity / 100.0;
+        Opacity = Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0));
         Location = new Point(Screen.PrimaryScreen.WorkingArea.Right - (int)(BaseW * scale) - 20, 20);
         if (Config.X != int.MinValue && Config.Y != int.MinValue)
         {
@@ -428,7 +465,7 @@ class Overlay : Form
 
         // Sekundentakt: nur leichte Arbeit (Zeit weiterzaehlen, zeichnen)
         System.Windows.Forms.Timer poll = new System.Windows.Forms.Timer();
-        poll.Interval = 1000;
+        poll.Interval = 250;
         poll.Tick += delegate { Tick(); };
         poll.Start();
 
@@ -459,6 +496,11 @@ class Overlay : Form
     {
         ContextMenuStrip m = new ContextMenuStrip();
         m.Items.Add(Lang.T("tray_toggle"), null, delegate { TaskbarClick(); });
+        m.Items.Add(Lang.T("tray_lyrics"), null, delegate { ToggleLyrics(); });
+        ToolStripMenuItem ct = new ToolStripMenuItem(Lang.T("tray_click"));
+        ct.Checked = clickThrough;
+        ct.Click += delegate { SetClickThrough(!clickThrough); };
+        m.Items.Add(ct);
         m.Items.Add(Lang.T("tray_playlists"), null, delegate { OpenPlaylists(); });
         m.Items.Add(Lang.T("tray_settings"), null, delegate { OpenSettings(); });
         m.Items.Add(Lang.T("tray_update"), null, delegate { StartUpdateCheck(true, null); });
@@ -474,6 +516,66 @@ class Overlay : Form
         settings.Activate();
     }
 
+    // Songtext-Fenster ein-/ausblenden
+    void ToggleLyrics()
+    {
+        if (lyrics != null && !lyrics.IsDisposed)
+        {
+            lyrics.Close();
+            lyrics = null;
+        }
+        else
+        {
+            lyrics = new LyricsForm(this);
+            lyrics.Show();
+        }
+        Invalidate();
+    }
+
+    // Durchklickbar: Mausklicks gehen durch das Overlay hindurch zum Spiel
+    void SetClickThrough(bool on)
+    {
+        clickThrough = on;
+        try
+        {
+            int ex = GetWindowLong(Handle, -20);
+            ex = on ? (ex | 0x20) : (ex & ~0x20);
+            SetWindowLong(Handle, -20, ex);
+        }
+        catch { }
+        BuildMenu();
+        Invalidate();
+        Balloon(Lang.T(on ? "ct_on" : "ct_off"));
+    }
+
+    public void ShowWelcome()
+    {
+        WelcomeForm w = new WelcomeForm();
+        w.Show();
+    }
+
+    public void ResetPosition()
+    {
+        Location = new Point(Screen.PrimaryScreen.WorkingArea.Right - (int)(BaseW * scale) - 20, 20);
+        SavePosition();
+    }
+
+    public int ScalePercent { get { return (int)Math.Round(scale * 100); } }
+
+    // Vorschau der Groesse, gespeichert wird erst mit SavePosition()
+    public void PreviewScale(int percent)
+    {
+        ApplyScale(percent / 100f);
+    }
+
+    // Lesezugriff fuer das Songtext-Fenster
+    public string CurTitle { get { return trackTitle; } }
+    public string CurArtist { get { return trackArtist; } }
+    public double PosSec { get { return posSec; } }
+    public double DurSec { get { return durSec; } }
+    public bool IsAd { get { return isAd; } }
+    public bool IsRunning { get { return running; } }
+
     void OpenPlaylists()
     {
         if (playlists == null || playlists.IsDisposed) playlists = new PlaylistForm();
@@ -484,7 +586,8 @@ class Overlay : Form
     // Wird von den Einstellungen aufgerufen
     public void ApplySettings()
     {
-        Opacity = Config.Opacity / 100.0;
+        Opacity = Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0));
+        if (lyrics != null && !lyrics.IsDisposed) lyrics.ApplyOpacity();
         BuildMenu();
         ApplyScale(scale);
         if (Config.Popup) ShowPopup();
@@ -543,13 +646,14 @@ class Overlay : Form
     // ---------- Zeichnen ----------
     RectangleF BtnRect(int i)
     {
-        if (i == 3) return new RectangleF(300 * scale, 7 * scale, 22 * scale, 22 * scale);
-        if (i == 4) return new RectangleF(326 * scale, 7 * scale, 22 * scale, 22 * scale);
+        if (i == 3) return new RectangleF(302 * scale, 7 * scale, 22 * scale, 22 * scale);   // Songtext
+        if (i == 4) return new RectangleF(326 * scale, 7 * scale, 22 * scale, 22 * scale);   // Playlists
+        if (i == 5) return new RectangleF(350 * scale, 7 * scale, 22 * scale, 22 * scale);   // Einstellungen
         return new RectangleF(BtnX[i] * scale, 5 * scale, 24 * scale, 24 * scale);
     }
 
     RectangleF VolRect() { return new RectangleF(70 * scale, 63 * scale, 214 * scale, 20 * scale); }
-    RectangleF SeekRect() { return new RectangleF(56 * scale, 50 * scale, 278 * scale, 12 * scale); }
+    RectangleF SeekRect() { return new RectangleF(56 * scale, 50 * scale, 302 * scale, 12 * scale); }
     RectangleF GripRect() { return new RectangleF(Width - 16, Height - 16, 16, 16); }
 
     static void DrawBtn(Graphics g, int kind, RectangleF r, bool hover, bool isPlaying)
@@ -594,6 +698,20 @@ class Overlay : Form
                 g.FillEllipse(b, cx - u * 4.4f, y - u * 0.9f, u * 1.8f, u * 1.8f);
                 g.DrawLine(p, cx - u * 1.8f, y, cx + u * 4.4f, y);
             }
+    }
+
+    static void DrawLyrics(Graphics g, RectangleF r, bool hover, bool active)
+    {
+        Color c = (hover || active) ? ACC : Color.FromArgb(200, 200, 200);
+        float x = r.X + r.Width * 0.14f, w = r.Width * 0.72f, cy = r.Y + r.Height / 2f, gap = r.Height * 0.25f;
+        using (Pen p = new Pen(c, Math.Max(1.5f, r.Height * 0.085f)))
+        {
+            p.StartCap = LineCap.Round;
+            p.EndCap = LineCap.Round;
+            g.DrawLine(p, x, cy - gap, x + w, cy - gap);
+            g.DrawLine(p, x, cy, x + w * 0.7f, cy);
+            g.DrawLine(p, x, cy + gap, x + w * 0.85f, cy + gap);
+        }
     }
 
     static void DrawGear(Graphics g, RectangleF r, bool hover)
@@ -674,7 +792,7 @@ class Overlay : Form
             if (durSec > 0)
             {
                 g.DrawString(FormatTime(posSec), fTiny, grey, new RectangleF(56 * s, 40 * s, 60 * s, 14 * s), left);
-                g.DrawString(FormatTime(durSec), fTiny, grey, new RectangleF(274 * s, 40 * s, 60 * s, 14 * s), right);
+                g.DrawString(FormatTime(durSec), fTiny, grey, new RectangleF(298 * s, 40 * s, 60 * s, 14 * s), right);
             }
 
             // Lautstaerke-Regler (nur Spotify)
@@ -698,7 +816,7 @@ class Overlay : Form
         }
 
         // Fortschrittsbalken (anklickbar zum Vorspulen)
-        float bx = 56 * s, bw = 278 * s, by = 56 * s, bh = 3 * s;
+        float bx = 56 * s, bw = 302 * s, by = 56 * s, bh = 3 * s;
         using (SolidBrush track = new SolidBrush(Color.FromArgb(62, 62, 62)))
             g.FillRectangle(track, bx, by, bw, bh);
         if (durSec > 0)
@@ -712,8 +830,14 @@ class Overlay : Form
         }
 
         for (int i = 0; i < 3; i++) DrawBtn(g, i, BtnRect(i), hoverBtn == i, playing);
-        DrawList(g, BtnRect(3), hoverBtn == 3);
-        DrawGear(g, BtnRect(4), hoverBtn == 4);
+        DrawLyrics(g, BtnRect(3), hoverBtn == 3, lyrics != null && !lyrics.IsDisposed);
+        DrawList(g, BtnRect(4), hoverBtn == 4);
+        DrawGear(g, BtnRect(5), hoverBtn == 5);
+
+        // Durchklickbar-Modus: oranger Rahmen
+        if (clickThrough)
+            using (Pen cp = new Pen(ACC, 3f))
+                g.DrawRectangle(cp, 1, 1, Width - 3, Height - 3);
 
         // Anfasser zum Groesse aendern
         using (Pen gp = new Pen(Color.FromArgb(110, 110, 110), 1.3f))
@@ -754,13 +878,13 @@ class Overlay : Form
     // ---------- Maus ----------
     int HitBtn(Point p)
     {
-        for (int i = 0; i < 5; i++) if (BtnRect(i).Contains(p)) return i;
+        for (int i = 0; i < 6; i++) if (BtnRect(i).Contains(p)) return i;
         return -1;
     }
 
     double SeekFrac(int x)
     {
-        return Math.Max(0, Math.Min(1, (x - 56 * scale) / (278 * scale)));
+        return Math.Max(0, Math.Min(1, (x - 56 * scale) / (302 * scale)));
     }
 
     void SetVolFromX(int x)
@@ -838,7 +962,8 @@ class Overlay : Form
             if (pressedBtn == 0) Cmd("prev", CMD_PREV);
             else if (pressedBtn == 1) Cmd("play", CMD_PLAY);
             else if (pressedBtn == 2) Cmd("next", CMD_NEXT);
-            else if (pressedBtn == 3) OpenPlaylists();
+            else if (pressedBtn == 3) ToggleLyrics();
+            else if (pressedBtn == 4) OpenPlaylists();
             else OpenSettings();
         }
         pressedBtn = -1;
@@ -867,7 +992,7 @@ class Overlay : Form
         base.OnMouseLeave(e);
     }
 
-    void SavePosition()
+    public void SavePosition()
     {
         Config.Scale = (int)Math.Round(scale * 100);
         Config.X = Left;
@@ -883,6 +1008,15 @@ class Overlay : Form
         host.Show();
         SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0013);
         HotKeys.Apply(Handle);
+
+        // Erster Start: kurze Tour zeigen
+        if (!Config.Welcome)
+        {
+            System.Windows.Forms.Timer wt = new System.Windows.Forms.Timer();
+            wt.Interval = 1500;
+            wt.Tick += delegate { wt.Stop(); wt.Dispose(); ShowWelcome(); };
+            wt.Start();
+        }
     }
 
     protected override void WndProc(ref Message m)
@@ -899,6 +1033,8 @@ class Overlay : Form
         else if (id == 4) Cmd("prev", CMD_PREV);
         else if (id == 5) Cmd("play", CMD_PLAY);
         else if (id == 6) TaskbarClick();
+        else if (id == 7) SetClickThrough(!clickThrough);
+        else if (id == 8) ToggleLyrics();
     }
 
     void ChangeVol(float step)
@@ -942,6 +1078,8 @@ class Overlay : Form
         if (Exiting) return;
         Exiting = true;
         volEvent.Set();
+        wake.Set();
+        try { if (lyrics != null && !lyrics.IsDisposed) lyrics.Close(); } catch { }
         SavePosition();
         rpc.Close();
         try { HotKeys.Remove(Handle); } catch { }
@@ -976,16 +1114,21 @@ class Overlay : Form
         base.OnFormClosing(e);
     }
 
-    // ---------- Sekundentakt (leicht) ----------
+    // ---------- Takt der Oberflaeche (leicht, 4x pro Sekunde) ----------
     void Tick()
     {
-        string found;
-        bool r, ad;
+        string found, st, sa;
+        bool r, ad, smtc;
+        int sstat;
         float v;
-        lock (stateLock) { found = wFound; r = wRunning; ad = wAd; v = wVol; }
+        lock (stateLock) { found = wFound; r = wRunning; ad = wAd; v = wVol; smtc = wSmtc; st = wTitle; sa = wArtist; sstat = wStatus; }
+
+        // Werbung: Fenstertitel oder Titel der Mediensitzung
+        if (smtc && Array.IndexOf(AdWords, st.Trim().ToLower()) >= 0) ad = true;
 
         bool changed = false;
         if (r != running) { running = r; changed = true; }
+        bool hold = DateTime.Now < holdPlayUntil;   // gerade selbst auf Play/Pause geklickt
 
         if (!r)
         {
@@ -996,28 +1139,38 @@ class Overlay : Form
         {
             if (!isAd) changed = true;
             isAd = true;
-            playing = true;
+            bool pl = smtc ? sstat == 4 : true;
+            if (hold) pl = playing;
+            if (pl != playing) changed = true;
+            playing = pl;
         }
         else
         {
             if (isAd) changed = true;
             isAd = false;
-            if (found != null)
+            string t = null, a = null;
+            bool pl = false;
+            if (smtc && st.Length > 0) { t = st; a = sa; pl = sstat == 4; }
+            else if (found != null)
             {
                 int i = found.IndexOf(" - ");
-                string a = found.Substring(0, i), t = found.Substring(i + 3);
-                if (a != trackArtist || t != trackTitle) changed = true;
+                a = found.Substring(0, i);
+                t = found.Substring(i + 3);
+                pl = true;
+            }
+            if (hold) pl = playing;
+            if (t != null)
+            {
+                if (a != trackArtist || t != trackTitle || !hasSong || pl != playing) changed = true;
                 trackArtist = a;
                 trackTitle = t;
-                if (!hasSong) changed = true;
                 hasSong = true;
-                if (!playing) changed = true;
-                playing = true;
+                playing = pl;
             }
             else
             {
-                if (playing) changed = true;
-                playing = false;
+                if (playing && !hold) changed = true;
+                if (!hold) playing = false;
             }
         }
 
@@ -1026,13 +1179,14 @@ class Overlay : Form
         lastTick = now;
         if (playing && durSec > 0 && !seeking)
         {
+            int oldSec = (int)posSec;
             posSec += dt;
             if (posSec > durSec) posSec = durSec;
-            changed = true;
+            if ((int)posSec != oldSec) changed = true;
         }
 
         tick++;
-        if (playing && durSec > 0 && tick % 10 == 0 && !seeking)
+        if (playing && durSec > 0 && tick % 40 == 0 && !seeking)
         {
             Thread ts = new Thread(SyncTimeline);
             ts.IsBackground = true;
@@ -1041,23 +1195,23 @@ class Overlay : Form
 
         if (Config.Volume && !volDrag && DateTime.Now > volHold && Math.Abs(v - vol) > 0.001f) { vol = v; changed = true; }
 
-        string key = isAd ? "ad" : (playing ? trackTitle : lastKey);
-        if (playing && key != lastKey)
+        string key = isAd ? "ad" : (playing || hasSong ? trackTitle + "|" + trackArtist : lastKey);
+        if ((playing || isAd) && key != lastKey)
         {
             lastKey = key;
             posSec = 0; durSec = 0;
             adInfo = "";
             if (Config.Popup) ShowPopup();
             if (host != null) host.RefreshThumb();
-            Thread t = new Thread(LoadCover);
-            t.IsBackground = true;
-            t.Start();
+            Thread t2 = new Thread(LoadCover);
+            t2.IsBackground = true;
+            t2.Start();
             changed = true;
         }
 
         if (changed) Invalidate();
 
-        rpc.Update(Config.Discord, DiscordRpc.EffectiveId(Config.DiscordId), trackTitle, trackArtist, playing && !isAd, posSec, durSec, running && hasSong && !isAd);
+        rpc.Update(Config.Discord, DiscordRpc.DefaultId, trackTitle, trackArtist, playing && !isAd, posSec, durSec, running && hasSong && !isAd, Config.DiscordCover);
     }
 
     [STAThread]

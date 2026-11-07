@@ -66,6 +66,21 @@ static class Media
         catch { return 2; }
     }
 
+    // Titel, Interpret und Zustand (4 = spielt, 5 = Pause) aus der Windows-Mediensitzung von Spotify.
+    // Das ist genauer als der Fenstertitel: erkennt Pause und Werbung zuverlaessig.
+    public static bool GetState(out string title, out string artist, out int status)
+    {
+        title = ""; artist = ""; status = -1;
+        dynamic s = Session();
+        if (s == null) return false;
+        dynamic props = Await(s.TryGetMediaPropertiesAsync(), propT);
+        title = (string)props.Title ?? "";
+        artist = (string)props.Artist ?? "";
+        dynamic info = s.GetPlaybackInfo();
+        status = Convert.ToInt32((object)info.PlaybackStatus);
+        return true;
+    }
+
     public static bool Seek(double sec)
     {
         try

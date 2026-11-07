@@ -1,8 +1,10 @@
 // Spotify Overlay - funny.games
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -58,7 +60,7 @@ class DiscordRpc
     }
 
     // Stufe 0: alles, 1: ohne Aktivitaetstyp, 2: ohne Typ und ohne Button (falls eine Discord-Version etwas ablehnt)
-    string Activity(int lvl, string title, string artist, bool playing, double pos, double dur)
+    string Activity(int lvl, string title, string artist, bool playing, double pos, double dur, string cover)
     {
         StringBuilder a = new StringBuilder("{");
         if (lvl == 0) a.Append("\"type\":2,");
@@ -71,7 +73,8 @@ class DiscordRpc
             if (dur > 0) a.Append(",\"end\":").Append(start + (long)dur);
             a.Append("}");
         }
-        a.Append(",\"assets\":{\"large_image\":\"logo\",\"large_text\":\"Spotify Overlay\"}");
+        string img = (lvl <= 1 && !string.IsNullOrEmpty(cover)) ? cover : "logo";
+        a.Append(",\"assets\":{\"large_image\":\"").Append(Esc(img)).Append("\",\"large_text\":\"").Append(Esc(Cut(title))).Append("\"}");
         string gh = Contact.GitHub;
         if (lvl <= 1 && gh.Length > 0)
             a.Append(",\"buttons\":[{\"label\":\"Get Spotify Overlay\",\"url\":\"").Append(Esc(gh)).Append("\"}]");
@@ -98,14 +101,7 @@ class DiscordRpc
         }
     }
 
-    public static string EffectiveId(string custom)
-    {
-        custom = (custom ?? "").Trim();
-        if (Regex.IsMatch(custom, "^[0-9]{15,25}$")) return custom;
-        return DefaultId;
-    }
-
-    public void Update(bool on, string clientId, string title, string artist, bool playing, double pos, double dur, bool hasTrack)
+    public void Update(bool on, string clientId, string title, string artist, bool playing, double pos, double dur, bool hasTrack, bool showCover)
     {
         bool idOk = Regex.IsMatch(clientId, "^[0-9]{15,25}$");
         bool active = on && idOk && hasTrack;
@@ -114,13 +110,13 @@ class DiscordRpc
         else if (!idOk) Status = "no valid Discord application ID in this build (see assets/discord_app.txt)";
         else if (!hasTrack) Status = "waiting for a song";
 
-        string key = active ? title + "|" + artist + "|" + playing + "|" + clientId : "off";
+        string key = active ? title + "|" + artist + "|" + playing + "|" + clientId + "|" + showCover : "off";
         long end = (playing && dur > 0) ? Now() + (long)(dur - pos) : 0;
 
         bool changed = key != lastKey;
         if (!changed && playing && dur > 0 && Math.Abs(end - lastEnd) > 3) changed = true;   // vorgespult
         if (!changed) return;
-        if ((DateTime.Now - lastTry).TotalSeconds < 4) return;
+        if ((DateTime.Now - lastTry).TotalSeconds < 3) return;
         if (busy) return;
 
         // nur beim Abschalten etwas senden, wenn schon verbunden
@@ -132,13 +128,47 @@ class DiscordRpc
         busy = true;
 
         string id = clientId;
-        string[] frames = new string[3];
-        if (active)
-            for (int i = 0; i < 3; i++) frames[i] = Frame(Activity(i, title, artist, playing, pos, dur));
-        else
-            frames[0] = frames[1] = frames[2] = Frame(null);
         bool isActive = active;
-        ThreadPool.QueueUserWorkItem(delegate { Push(id, frames, isActive); });
+        ThreadPool.QueueUserWorkItem(delegate { Push(id, isActive, title, artist, playing, pos, dur, showCover); });
+    }
+
+    // ---- Album-Cover (oeffentliche Bild-Adresse) ueber die iTunes-Suche, ohne Anmeldung ----
+    static Dictionary<string, string> covers = new Dictionary<string, string>();
+
+    static bool Similar(string a, string b)
+    {
+        a = (a ?? "").ToLower().Trim();
+        b = (b ?? "").ToLower().Trim();
+        if (a.Length == 0 || b.Length == 0) return false;
+        return a.Contains(b) || b.Contains(a) || a.Substring(0, Math.Min(6, a.Length)) == b.Substring(0, Math.Min(6, b.Length));
+    }
+
+    static string CoverFor(string artist, string title)
+    {
+        string k = artist + "|" + title;
+        lock (covers) { string c; if (covers.TryGetValue(k, out c)) return c; }
+        string url = "";
+        try
+        {
+            ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+            HttpWebRequest rq = (HttpWebRequest)WebRequest.Create("https://itunes.apple.com/search?media=music&entity=song&limit=1&term=" + Uri.EscapeDataString(artist + " " + title));
+            rq.UserAgent = "SpotifyOverlay";
+            rq.Timeout = 4000;
+            string json;
+            using (WebResponse rs = rq.GetResponse())
+            using (StreamReader sr = new StreamReader(rs.GetResponseStream()))
+                json = sr.ReadToEnd();
+            List<object> res = Json.Get(Json.Parse(json), "results") as List<object>;
+            if (res != null && res.Count > 0)
+            {
+                object r = res[0];
+                if (Similar(Json.Str(r, "trackName"), title) && Similar(Json.Str(r, "artistName"), artist))
+                    url = Json.Str(r, "artworkUrl100").Replace("100x100bb", "512x512bb");
+            }
+        }
+        catch { }
+        lock (covers) { covers[k] = url; }
+        return url;
     }
 
     static string ErrorOf(string reply)
@@ -147,12 +177,20 @@ class DiscordRpc
         return m.Success ? m.Groups[1].Value : reply;
     }
 
-    void Push(string id, string[] frames, bool active)
+    void Push(string id, bool active, string title, string artist, bool playing, double pos, double dur, bool showCover)
     {
         lock (gate)
         {
             try
             {
+                string[] frames = new string[3];
+                if (active)
+                {
+                    string cover = showCover ? CoverFor(artist, title) : "";
+                    for (int i = 0; i < 3; i++) frames[i] = Frame(Activity(i, title, artist, playing, pos, dur, cover));
+                }
+                else frames[0] = frames[1] = frames[2] = Frame(null);
+
                 Connect(id);
                 string reply = "";
                 bool ok = false;

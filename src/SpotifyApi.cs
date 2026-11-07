@@ -275,16 +275,16 @@ static class SpotifyApi
         return list;
     }
 
-    // true = wird abgespielt, false = nur in Spotify geoeffnet
-    public static bool Play(string playlistId)
+    // 0 = wird abgespielt, 1 = kein Premium (Playlist in Spotify geoeffnet), 2 = nur in Spotify geoeffnet
+    public static int Play(string playlistId)
     {
         string body = "{\"context_uri\":\"spotify:playlist:" + playlistId + "\"}";
         int st;
-        Call("PUT", "https://api.spotify.com/v1/me/player/play", body, out st);
-        if (st >= 200 && st < 300) return true;
+        string reply = Call("PUT", "https://api.spotify.com/v1/me/player/play", body, out st);
+        if (st >= 200 && st < 300) return 0;
 
-        // kein aktives Geraet oder kein Premium: Playlist in Spotify oeffnen
+        // kein Premium, kein aktives Geraet o.ae.: Playlist in Spotify oeffnen
         try { Process.Start("spotify:playlist:" + playlistId); } catch { }
-        return false;
+        return reply.Contains("PREMIUM_REQUIRED") ? 1 : 2;
     }
 }

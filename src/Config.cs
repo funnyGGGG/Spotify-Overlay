@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 static class App
 {
-    public const string Version = "1.17";
+    public const string Version = "1.18";
 }
 
 // Einstellungen, liegen in der Registry unter HKCU\Software\SpotifyOverlay
@@ -14,15 +14,19 @@ static class Config
 
     public static string Language = "en";
     public static int Scale = 100;
-    public static int Opacity = 84;
+    public static int Opacity = 70;
     public static bool Popup = false;
     public static bool Volume = true;
     public static bool Discord = true;
     public static bool AutoUpdate = true;
+    public static bool DiscordCover = true;
+    public static bool Welcome = false;
     public static string DiscordId = "";
     public static string SpotifyId = "";
     // Tastenkuerzel: Lauter, Leiser, Weiter, Zurueck, Play/Pause, Overlay ein/aus
-    public static string[] Hk = new string[] { "", "", "", "", "", "" };
+    public static string[] Hk = new string[] { "", "", "", "", "", "", "", "" };
+    // Fenster fuer den Songtext
+    public static int LyX = int.MinValue, LyY = int.MinValue, LyW = 380, LyH = 440;
     public static int X = int.MinValue;
     public static int Y = int.MinValue;
 
@@ -43,11 +47,17 @@ static class Config
                     string l = k.GetValue("Language") as string;
                     if (l == "de" || l == "en") Language = l;
                     Scale = GetInt(k, "Scale", 100);
-                    Opacity = GetInt(k, "Opacity", 84);
+                    Opacity = GetInt(k, "Opacity", 70);
                     Popup = GetInt(k, "PopupOnly", 0) == 1;
                     Volume = GetInt(k, "ShowVolume", 1) == 1;
                     Discord = GetInt(k, "Discord", 1) == 1;
                     AutoUpdate = GetInt(k, "AutoUpdate", 1) == 1;
+                    DiscordCover = GetInt(k, "DiscordCover", 1) == 1;
+                    Welcome = GetInt(k, "Welcome", 0) == 1;
+                    LyX = GetInt(k, "LyX", int.MinValue);
+                    LyY = GetInt(k, "LyY", int.MinValue);
+                    LyW = GetInt(k, "LyW", 380);
+                    LyH = GetInt(k, "LyH", 440);
                     DiscordId = (k.GetValue("DiscordId") as string) ?? "";
                     SpotifyId = (k.GetValue("SpotifyId") as string) ?? "";
                     for (int i = 0; i < Hk.Length; i++) Hk[i] = (k.GetValue("Hk" + i) as string) ?? "";
@@ -73,6 +83,12 @@ static class Config
                 k.SetValue("ShowVolume", Volume ? 1 : 0);
                 k.SetValue("Discord", Discord ? 1 : 0);
                 k.SetValue("AutoUpdate", AutoUpdate ? 1 : 0);
+                k.SetValue("DiscordCover", DiscordCover ? 1 : 0);
+                k.SetValue("Welcome", Welcome ? 1 : 0);
+                if (LyX != int.MinValue) k.SetValue("LyX", LyX);
+                if (LyY != int.MinValue) k.SetValue("LyY", LyY);
+                k.SetValue("LyW", LyW);
+                k.SetValue("LyH", LyH);
                 k.SetValue("DiscordId", DiscordId ?? "");
                 k.SetValue("SpotifyId", SpotifyId ?? "");
                 for (int i = 0; i < Hk.Length; i++) k.SetValue("Hk" + i, Hk[i] ?? "");
