@@ -1,5 +1,27 @@
 # Changelog / Änderungen
 
+## 1.19
+- **EN:** Click-through mode no longer shows a Windows notification. The orange frame shows that it is on.
+- **DE:** Der Durchklickbar-Modus zeigt keine Windows-Benachrichtigung mehr. Der orange Rahmen zeigt, dass er an ist.
+- **EN:** New setting "Follow Spotify": the overlay shows while Spotify is running and hides when Spotify is closed.
+- **DE:** Neue Einstellung "Spotify folgen": Das Overlay wird gezeigt, solange Spotify läuft, und versteckt, wenn Spotify beendet wird.
+- **EN:** New Streamer tab: writes the current song to a text file and offers a web page for OBS (Browser source) with cover, title, artist and progress.
+- **DE:** Neuer Streamer-Tab: Schreibt den aktuellen Song in eine Textdatei und bietet eine Webseite für OBS (Browser-Quelle) mit Cover, Titel, Interpret und Fortschritt an.
+- **EN:** Playlists without login: copy a playlist link in Spotify and add it to your own list. It opens in Spotify, no Client ID or Premium needed.
+- **DE:** Playlists ohne Anmeldung: Einen Playlist-Link in Spotify kopieren und zur eigenen Liste hinzufügen. Sie öffnet sich in Spotify, ohne Client-ID und ohne Premium.
+
+- **EN:** Game profiles: the overlay detects the program in front (for example Roblox or Minecraft) and uses its own size, opacity, popup mode, click-through and position. It goes back to normal when you leave.
+- **DE:** Spiel-Profile: Das Overlay erkennt das vorderste Programm (zum Beispiel Roblox oder Minecraft) und nutzt dafür eigene Größe, Deckkraft, Popup-Modus, Durchklickbar und Position. Beim Verlassen geht alles zurück auf normal.
+- **EN:** Dodge mode (the overlay turns almost see-through when the mouse is over it) and mini waves that move with Spotify's loudness. Both are off by default.
+- **DE:** Ausweich-Modus (das Overlay wird fast durchsichtig, wenn die Maus darüber ist) und Mini-Wellen, die sich zur Lautstärke von Spotify bewegen. Beides ist standardmäßig aus.
+- **EN:** The volume step of the volume keybinds can be changed. The volume slider follows Spotify's volume faster.
+- **DE:** Der Lautstärke-Schritt der Lautstärke-Tastenkürzel lässt sich einstellen. Der Lautstärkeregler folgt der Lautstärke von Spotify schneller.
+- **EN:** In click-through mode the lyrics window ignores the mouse too. Clicking Save in the settings now closes the settings window.
+- **DE:** Im Durchklickbar-Modus ignoriert auch das Songtext-Fenster die Maus. Ein Klick auf Speichern schließt jetzt das Einstellungsfenster.
+
+- **EN:** Optional donations: if a donation link is set, the app shows a voluntary "Donate" button in Help & Contact, a short note on the last page of the tour and a link in the update window. The app stays free.
+- **DE:** Freiwillige Spenden: Ist ein Spenden-Link eingestellt, zeigt die App einen freiwilligen Button "Spenden" unter Hilfe & Kontakt, einen kurzen Hinweis auf der letzten Seite der Tour und einen Link im Update-Fenster. Die App bleibt kostenlos.
+
 ## 1.18
 - **EN:** Lyrics window: a button in the overlay opens the lyrics of the current song and follows the song line by line.
 - **DE:** Songtext-Fenster: Ein Button im Overlay öffnet den Text des aktuellen Songs und folgt dem Lied Zeile für Zeile.
