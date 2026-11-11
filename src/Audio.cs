@@ -66,6 +66,15 @@ static class SpotifyAudio
         int GetMute(out bool mute);
     }
 
+    [ComImport, Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioMeterInformation
+    {
+        int GetPeakValue(out float peak);
+        int GetMeteringChannelCount(out int count);
+        int GetChannelsPeakValues(int count, [Out] float[] values);
+        int QueryHardwareSupport(out int mask);
+    }
+
     static readonly object gate = new object();
     static List<ISimpleAudioVolume> cache = new List<ISimpleAudioVolume>();
     static DateTime cacheTime = DateTime.MinValue;
@@ -119,6 +128,25 @@ static class SpotifyAudio
             }
         }
         catch { cache = new List<ISimpleAudioVolume>(); return -1f; }
+    }
+
+    // Aktueller Pegel 0..1 (wie laut Spotify gerade spielt), 0 wenn nichts zu messen ist
+    public static float Peak()
+    {
+        try
+        {
+            lock (gate)
+            {
+                List<ISimpleAudioVolume> l = Sessions();
+                if (l.Count == 0) return 0f;
+                float p;
+                ((IAudioMeterInformation)l[0]).GetPeakValue(out p);
+                if (p < 0f) p = 0f;
+                if (p > 1f) p = 1f;
+                return p;
+            }
+        }
+        catch { return 0f; }
     }
 
     public static void Set(float v)

@@ -33,6 +33,21 @@ static class Contact
         }
     }
 
+    // Freiwillige Spenden: Link steht in donate.txt. Solange dort DEIN-LINK steht, wird nichts angezeigt.
+    public static string Donate
+    {
+        get { return Read("donate.txt"); }
+    }
+
+    public static bool HasDonate
+    {
+        get
+        {
+            string d = Donate;
+            return d.StartsWith("http") && !d.Contains("DEIN-LINK");
+        }
+    }
+
     public static string GitHub
     {
         get

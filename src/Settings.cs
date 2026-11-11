@@ -1,7 +1,9 @@
 // Spotify Overlay - funny.games
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
@@ -15,14 +17,15 @@ class SettingsForm : Form
     static readonly Color CARD = Color.FromArgb(32, 32, 32);
     static readonly Color DIM = Color.FromArgb(160, 160, 160);
     static readonly Color GREEN = Color.FromArgb(29, 185, 84);
-    static readonly string[] NavKeys = { "tab_general", "tab_controls", "tab_connections", "tab_updates", "tab_help" };
+    static readonly string[] NavKeys = { "tab_general", "tab_controls", "tab_connections", "tab_streamer", "tab_profiles", "tab_updates", "tab_help" };
     static readonly string[] HkText = { "hk_volup", "hk_voldown", "hk_next", "hk_prev", "hk_play", "hk_toggle", "hk_click", "hk_lyrics" };
     const int HK = 8;
 
     Overlay ov;
     bool loading = true, dirty = false;
-    NavItem[] nav = new NavItem[5];
-    Panel[] pages = new Panel[5];
+    const int TABS = 7;
+    NavItem[] nav = new NavItem[TABS];
+    Panel[] pages = new Panel[TABS];
     Label lSideVer, lSaved;
     FlatBtn bSave, bClose;
     System.Windows.Forms.Timer savedTimer;
@@ -30,7 +33,9 @@ class SettingsForm : Form
     // Stand beim Oeffnen (zum Zuruecksetzen)
     string snapLang, snapSpId;
     int snapOpacity, snapScale;
-    bool snapPopup, snapVolume, snapDiscord, snapCover, snapUpdate;
+    bool snapPopup, snapVolume, snapDiscord, snapCover, snapUpdate, snapFollow, snapStrFile, snapStrWeb, snapDodge, snapWaves;
+    string snapStrFmt, snapProfiles;
+    int snapVolStep;
     string[] snapHk = new string[HK];
 
     // Allgemein
@@ -38,9 +43,10 @@ class SettingsForm : Form
     ComboBox cbLang;
     Slider slOpacity, slSize;
     FlatBtn bResetPos;
-    Toggle tPopup, tVolume, tAuto;
+    Toggle tPopup, tVolume, tAuto, tFollow, tDodge, tWaves;
     // Steuerung
-    Label hControls, lHint;
+    Label hControls, lHint, lVolStep, lVolStepVal;
+    Slider slVolStep;
     Label[] hkLabels = new Label[HK];
     KeyBox[] hkBoxes = new KeyBox[HK];
     // Verbindungen
@@ -48,6 +54,19 @@ class SettingsForm : Form
     Toggle tDiscord, tCover;
     TextBox tSpId;
     FlatBtn bCopy;
+    // Streamer
+    Label hStr, lStrInfo, gStrFile, lStrFmt, lStrPath, gStrWeb, lStrUrl, lStrHint;
+    Toggle tStrFile, tStrWeb;
+    TextBox tStrFmt;
+    FlatBtn bStrFolder, bStrCopy;
+    // Spiele-Profile
+    Label hProf, lProfInfo, lProfApp, gProfEdit, lProfSize, lProfSizeVal, lProfOp, lProfOpVal, lProfPos;
+    ListBox lbProf;
+    ComboBox cbProfApp;
+    FlatBtn bProfAdd, bProfDel, bProfPos, bProfPosClear;
+    Slider slProfSize, slProfOp;
+    Toggle tProfPopup, tProfClick, tProfVol;
+    bool profLoading = false;
     // Updates
     Label hUpd, lVersion, lRepo, lResult;
     Toggle tUpdate;
@@ -56,7 +75,7 @@ class SettingsForm : Form
     Label hHelp, lCardTitle, lCardText, lGuide;
     Panel card;
     RichTextBox rtb;
-    FlatBtn bDiscord, bGitHub, bIssue, bTour;
+    FlatBtn bDiscord, bGitHub, bIssue, bTour, bDonate;
 
     public SettingsForm(Overlay overlay)
     {
@@ -72,7 +91,7 @@ class SettingsForm : Form
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
         BuildSidebar();
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < TABS; i++)
         {
             Panel p = new Panel();
             p.Location = new Point(190, 0);
@@ -86,8 +105,10 @@ class SettingsForm : Form
         BuildGeneral(pages[0]);
         BuildControls(pages[1]);
         BuildConnections(pages[2]);
-        BuildUpdates(pages[3]);
-        BuildHelp(pages[4]);
+        BuildStreamer(pages[3]);
+        BuildProfiles(pages[4]);
+        BuildUpdates(pages[5]);
+        BuildHelp(pages[6]);
 
         LoadValues();
         TakeSnapshot();
@@ -174,7 +195,7 @@ class SettingsForm : Form
         title.Size = new Size(160, 26);
         side.Controls.Add(title);
 
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < TABS; i++)
         {
             NavItem n = new NavItem();
             n.Location = new Point(0, 80 + i * 42);
@@ -214,13 +235,13 @@ class SettingsForm : Form
         bSave = new FlatBtn("", GREEN, Color.Black);
         bSave.Location = new Point(486, 12);
         bSave.Size = new Size(110, 40);
-        bSave.Click += delegate { SaveAll(); };
+        bSave.Click += delegate { SaveAll(); Close(); };
         bar.Controls.Add(bSave);
     }
 
     void ShowTab(int i)
     {
-        for (int k = 0; k < 5; k++)
+        for (int k = 0; k < TABS; k++)
         {
             pages[k].Visible = (k == i);
             nav[k].Selected = (k == i);
@@ -267,10 +288,13 @@ class SettingsForm : Form
         bResetPos.Click += delegate { ov.ResetPosition(); };
         p.Controls.Add(bResetPos);
 
-        gBehavior = Group(p, 330);
-        tPopup = Tog(p, 364);
-        tVolume = Tog(p, 404);
-        tAuto = Tog(p, 444);
+        gBehavior = Group(p, 306);
+        tPopup = Tog(p, 336);
+        tVolume = Tog(p, 370);
+        tAuto = Tog(p, 404);
+        tFollow = Tog(p, 438);
+        tDodge = Tog(p, 472);
+        tWaves = Tog(p, 506);
     }
 
     void BuildControls(Panel p)
@@ -285,6 +309,14 @@ class SettingsForm : Form
             hkBoxes[i].Size = new Size(230, 28);
             p.Controls.Add(hkBoxes[i]);
         }
+        lVolStep = Lbl(p, 36, 510, 300, 24, 10f, Color.White, FontStyle.Regular);
+        slVolStep = new Slider();
+        slVolStep.Minimum = 1;
+        slVolStep.Maximum = 25;
+        slVolStep.Location = new Point(340, 506);
+        slVolStep.Size = new Size(200, 28);
+        p.Controls.Add(slVolStep);
+        lVolStepVal = Lbl(p, 548, 510, 50, 24, 10f, DIM, FontStyle.Regular);
     }
 
     void BuildConnections(Panel p)
@@ -308,6 +340,259 @@ class SettingsForm : Form
             bCopy.Text = Lang.T("set_copied");
         };
         p.Controls.Add(bCopy);
+    }
+
+    void BuildStreamer(Panel p)
+    {
+        hStr = Head(p);
+        lStrInfo = Lbl(p, 36, 66, 560, 40, 9.5f, DIM, FontStyle.Regular);
+
+        gStrFile = Group(p, 118);
+        tStrFile = Tog(p, 148);
+        lStrFmt = Lbl(p, 36, 186, 560, 22, 9.5f, DIM, FontStyle.Regular);
+        tStrFmt = Box(p, 36, 210, 560);
+        lStrPath = Lbl(p, 36, 246, 560, 22, 9f, DIM, FontStyle.Regular);
+        bStrFolder = new FlatBtn("", FIELD, Color.White);
+        bStrFolder.Location = new Point(36, 274);
+        bStrFolder.Size = new Size(200, 34);
+        bStrFolder.Click += delegate
+        {
+            try { Directory.CreateDirectory(Streamer.Folder); Process.Start(Streamer.Folder); } catch { }
+        };
+        p.Controls.Add(bStrFolder);
+
+        gStrWeb = Group(p, 332);
+        tStrWeb = Tog(p, 362);
+        lStrUrl = Lbl(p, 36, 402, 560, 24, 10.5f, Color.White, FontStyle.Bold);
+        bStrCopy = new FlatBtn("", FIELD, Color.White);
+        bStrCopy.Location = new Point(36, 432);
+        bStrCopy.Size = new Size(200, 34);
+        bStrCopy.Click += delegate
+        {
+            try { Clipboard.SetText(Streamer.Url); } catch { }
+            bStrCopy.Text = Lang.T("set_copied");
+        };
+        p.Controls.Add(bStrCopy);
+        lStrHint = Lbl(p, 36, 476, 560, 60, 9f, DIM, FontStyle.Regular);
+    }
+
+    void BuildProfiles(Panel p)
+    {
+        hProf = Head(p);
+        lProfInfo = Lbl(p, 36, 62, 560, 44, 9.5f, DIM, FontStyle.Regular);
+
+        lbProf = new ListBox();
+        lbProf.Location = new Point(36, 112);
+        lbProf.Size = new Size(240, 132);
+        lbProf.BackColor = FIELD;
+        lbProf.ForeColor = Color.White;
+        lbProf.BorderStyle = BorderStyle.None;
+        lbProf.Font = new Font("Segoe UI", 10.5f);
+        lbProf.SelectedIndexChanged += delegate { ProfShow(); };
+        p.Controls.Add(lbProf);
+
+        lProfApp = Lbl(p, 296, 108, 300, 48, 9f, DIM, FontStyle.Regular);
+        cbProfApp = new ComboBox();
+        cbProfApp.DropDownStyle = ComboBoxStyle.DropDown;
+        cbProfApp.Location = new Point(296, 160);
+        cbProfApp.Size = new Size(300, 28);
+        cbProfApp.FlatStyle = FlatStyle.Flat;
+        cbProfApp.BackColor = FIELD;
+        cbProfApp.ForeColor = Color.White;
+        cbProfApp.DropDown += delegate { ProfFillApps(); };
+        p.Controls.Add(cbProfApp);
+
+        bProfAdd = new FlatBtn("", GREEN, Color.Black);
+        bProfAdd.Location = new Point(296, 200);
+        bProfAdd.Size = new Size(144, 34);
+        bProfAdd.Click += delegate { ProfAdd(); };
+        p.Controls.Add(bProfAdd);
+
+        bProfDel = new FlatBtn("", FIELD, Color.White);
+        bProfDel.Location = new Point(452, 200);
+        bProfDel.Size = new Size(144, 34);
+        bProfDel.Click += delegate { ProfDelete(); };
+        p.Controls.Add(bProfDel);
+
+        gProfEdit = Group(p, 262);
+        lProfSize = Lbl(p, 36, 296, 300, 24, 10f, Color.White, FontStyle.Regular);
+        slProfSize = new Slider();
+        slProfSize.Minimum = 60;
+        slProfSize.Maximum = 250;
+        slProfSize.Location = new Point(340, 292);
+        slProfSize.Size = new Size(200, 28);
+        slProfSize.ValueChanged += delegate { lProfSizeVal.Text = slProfSize.Value + " %"; ProfEdit(); };
+        p.Controls.Add(slProfSize);
+        lProfSizeVal = Lbl(p, 548, 296, 50, 24, 10f, DIM, FontStyle.Regular);
+
+        lProfOp = Lbl(p, 36, 336, 300, 24, 10f, Color.White, FontStyle.Regular);
+        slProfOp = new Slider();
+        slProfOp.Minimum = 20;
+        slProfOp.Maximum = 100;
+        slProfOp.Location = new Point(340, 332);
+        slProfOp.Size = new Size(200, 28);
+        slProfOp.ValueChanged += delegate { lProfOpVal.Text = slProfOp.Value + " %"; ProfEdit(); };
+        p.Controls.Add(slProfOp);
+        lProfOpVal = Lbl(p, 548, 336, 50, 24, 10f, DIM, FontStyle.Regular);
+
+        tProfPopup = Tog(p, 376);
+        tProfClick = Tog(p, 410);
+        tProfVol = Tog(p, 444);
+        tProfPopup.CheckedChanged += delegate { ProfEdit(); };
+        tProfClick.CheckedChanged += delegate { ProfEdit(); };
+        tProfVol.CheckedChanged += delegate { ProfEdit(); };
+
+        lProfPos = Lbl(p, 36, 482, 560, 22, 9.5f, DIM, FontStyle.Regular);
+        bProfPos = new FlatBtn("", FIELD, Color.White);
+        bProfPos.Location = new Point(36, 508);
+        bProfPos.Size = new Size(300, 32);
+        bProfPos.Click += delegate { ProfSetPos(true); };
+        p.Controls.Add(bProfPos);
+        bProfPosClear = new FlatBtn("", FIELD, Color.White);
+        bProfPosClear.Location = new Point(346, 508);
+        bProfPosClear.Size = new Size(120, 32);
+        bProfPosClear.Click += delegate { ProfSetPos(false); };
+        p.Controls.Add(bProfPosClear);
+
+        ProfRefreshList();
+        ProfShow();
+    }
+
+    void ProfRefreshList()
+    {
+        int keep = lbProf.SelectedIndex;
+        lbProf.Items.Clear();
+        foreach (GameProfile g in GameProfiles.Items) lbProf.Items.Add(g.Exe);
+        if (keep >= 0 && keep < lbProf.Items.Count) lbProf.SelectedIndex = keep;
+    }
+
+    // Laufende Programme mit Fenster als Vorschlaege
+    void ProfFillApps()
+    {
+        string cur = cbProfApp.Text;
+        List<string> names = new List<string>();
+        try
+        {
+            foreach (Process pr in Process.GetProcesses())
+            {
+                try
+                {
+                    if (pr.MainWindowTitle.Length > 0 && !names.Contains(pr.ProcessName)) names.Add(pr.ProcessName);
+                }
+                catch { }
+                pr.Dispose();
+            }
+        }
+        catch { }
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        string[] ex = new string[] { "RobloxPlayerBeta", "javaw:Minecraft" };
+        foreach (string e in ex) if (!names.Contains(e)) names.Add(e);
+        cbProfApp.Items.Clear();
+        cbProfApp.Items.AddRange(names.ToArray());
+        cbProfApp.Text = cur;
+    }
+
+    // Zeigt die Werte des gewaehlten Profils
+    void ProfShow()
+    {
+        int i = lbProf.SelectedIndex;
+        bool has = i >= 0 && i < GameProfiles.Items.Count;
+        profLoading = true;
+        slProfSize.Enabled = has;
+        slProfOp.Enabled = has;
+        tProfPopup.Enabled = has;
+        tProfClick.Enabled = has;
+        tProfVol.Enabled = has;
+        bProfPos.Enabled = has;
+        bProfPosClear.Enabled = has;
+        if (has)
+        {
+            GameProfile g = GameProfiles.Items[i];
+            slProfSize.Value = Math.Max(60, Math.Min(250, g.Scale));
+            slProfOp.Value = Math.Max(20, Math.Min(100, g.Opacity));
+            tProfPopup.Checked = g.Popup;
+            tProfClick.Checked = g.Click;
+            tProfVol.Checked = g.Volume;
+            lProfPos.Text = g.HasPos ? Lang.T("prof_pos", g.X, g.Y) : Lang.T("prof_pos_none");
+        }
+        else
+        {
+            slProfSize.Value = 100;
+            slProfOp.Value = 70;
+            tProfPopup.Checked = false;
+            tProfClick.Checked = false;
+            tProfVol.Checked = true;
+            lProfPos.Text = Lang.T("prof_pick");
+        }
+        lProfSizeVal.Text = slProfSize.Value + " %";
+        lProfOpVal.Text = slProfOp.Value + " %";
+        profLoading = false;
+    }
+
+    void ProfEdit()
+    {
+        if (loading || profLoading) return;
+        int i = lbProf.SelectedIndex;
+        if (i < 0 || i >= GameProfiles.Items.Count) return;
+        GameProfile g = GameProfiles.Items[i];
+        g.Scale = slProfSize.Value;
+        g.Opacity = slProfOp.Value;
+        g.Popup = tProfPopup.Checked;
+        g.Click = tProfClick.Checked;
+        g.Volume = tProfVol.Checked;
+        GameProfiles.Store();
+        dirty = true;
+    }
+
+    void ProfAdd()
+    {
+        string n = (cbProfApp.Text ?? "").Trim();
+        if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) n = n.Substring(0, n.Length - 4);
+        if (n.Length == 0) return;
+        int at = -1;
+        for (int i = 0; i < GameProfiles.Items.Count; i++)
+            if (string.Equals(GameProfiles.Items[i].Exe, n, StringComparison.OrdinalIgnoreCase)) at = i;
+        if (at < 0)
+        {
+            GameProfile g = new GameProfile();
+            g.Exe = n;
+            g.Scale = Math.Max(60, Math.Min(250, ov.ScalePercent));
+            g.Opacity = Config.Opacity;
+            g.Popup = Config.Popup;
+            g.Click = false;
+            g.Volume = Config.Volume;
+            GameProfiles.Items.Add(g);
+            GameProfiles.Store();
+            dirty = true;
+            at = GameProfiles.Items.Count - 1;
+        }
+        ProfRefreshList();
+        lbProf.SelectedIndex = at;
+    }
+
+    void ProfDelete()
+    {
+        int i = lbProf.SelectedIndex;
+        if (i < 0 || i >= GameProfiles.Items.Count) return;
+        GameProfiles.Items.RemoveAt(i);
+        GameProfiles.Store();
+        dirty = true;
+        lbProf.SelectedIndex = -1;
+        ProfRefreshList();
+        ProfShow();
+    }
+
+    // Position des Overlays im Profil merken (oder loeschen)
+    void ProfSetPos(bool set)
+    {
+        int i = lbProf.SelectedIndex;
+        if (i < 0 || i >= GameProfiles.Items.Count) return;
+        GameProfile g = GameProfiles.Items[i];
+        g.X = set ? ov.Left : int.MinValue;
+        g.Y = set ? ov.Top : int.MinValue;
+        GameProfiles.Store();
+        dirty = true;
+        ProfShow();
     }
 
     void BuildUpdates(Panel p)
@@ -372,6 +657,12 @@ class SettingsForm : Form
         bTour.Click += delegate { ov.ShowWelcome(); };
         card.Controls.Add(bTour);
 
+        bDonate = new FlatBtn("", GREEN, Color.Black);
+        bDonate.Location = new Point(438, 118);
+        bDonate.Size = new Size(112, 32);
+        bDonate.Click += delegate { Open(Contact.Donate); };
+        card.Controls.Add(bDonate);
+
         lGuide = Group(p, 250);
         rtb = new RichTextBox();
         rtb.Location = new Point(36, 280);
@@ -400,6 +691,14 @@ class SettingsForm : Form
         tPopup.Checked = Config.Popup;
         tVolume.Checked = Config.Volume;
         tAuto.Checked = AutostartOn();
+        tFollow.Checked = Config.Follow;
+        tStrFile.Checked = Config.StreamFile;
+        tStrWeb.Checked = Config.StreamWeb;
+        tStrFmt.Text = Config.StreamFormat ?? "";
+        tDodge.Checked = Config.Dodge;
+        tWaves.Checked = Config.Waves;
+        slVolStep.Value = Math.Max(1, Math.Min(25, Config.VolStep));
+        lVolStepVal.Text = slVolStep.Value + " %";
         tDiscord.Checked = Config.Discord;
         tCover.Checked = Config.DiscordCover;
         tUpdate.Checked = Config.AutoUpdate;
@@ -417,6 +716,14 @@ class SettingsForm : Form
         snapDiscord = Config.Discord;
         snapCover = Config.DiscordCover;
         snapUpdate = Config.AutoUpdate;
+        snapFollow = Config.Follow;
+        snapStrFile = Config.StreamFile;
+        snapStrWeb = Config.StreamWeb;
+        snapStrFmt = Config.StreamFormat ?? "";
+        snapDodge = Config.Dodge;
+        snapWaves = Config.Waves;
+        snapVolStep = Config.VolStep;
+        snapProfiles = Config.Profiles ?? "";
         snapSpId = Config.SpotifyId ?? "";
         for (int i = 0; i < HK; i++) snapHk[i] = Config.Hk[i];
     }
@@ -431,6 +738,15 @@ class SettingsForm : Form
         Config.Discord = snapDiscord;
         Config.DiscordCover = snapCover;
         Config.AutoUpdate = snapUpdate;
+        Config.Follow = snapFollow;
+        Config.StreamFile = snapStrFile;
+        Config.StreamWeb = snapStrWeb;
+        Config.StreamFormat = snapStrFmt;
+        Config.Dodge = snapDodge;
+        Config.Waves = snapWaves;
+        Config.VolStep = snapVolStep;
+        Config.Profiles = snapProfiles;
+        GameProfiles.Load();
         Config.SpotifyId = snapSpId;
         for (int i = 0; i < HK; i++) Config.Hk[i] = snapHk[i];
         ov.PreviewScale(snapScale);
@@ -480,6 +796,13 @@ class SettingsForm : Form
         tDiscord.CheckedChanged += delegate { if (!loading) Apply(); };
         tCover.CheckedChanged += delegate { if (!loading) Apply(); };
         tUpdate.CheckedChanged += delegate { if (!loading) Apply(); };
+        tFollow.CheckedChanged += delegate { if (!loading) Apply(); };
+        tStrFile.CheckedChanged += delegate { if (!loading) Apply(); };
+        tStrWeb.CheckedChanged += delegate { if (!loading) Apply(); };
+        tStrFmt.TextChanged += delegate { if (!loading) Apply(); };
+        tDodge.CheckedChanged += delegate { if (!loading) Apply(); };
+        tWaves.CheckedChanged += delegate { if (!loading) Apply(); };
+        slVolStep.ValueChanged += delegate { lVolStepVal.Text = slVolStep.Value + " %"; if (!loading) Apply(); };
         tSpId.TextChanged += delegate { if (!loading) Apply(); };
         for (int i = 0; i < HK; i++) hkBoxes[i].TextChanged += delegate { if (!loading) Apply(); };
     }
@@ -487,7 +810,7 @@ class SettingsForm : Form
     void Texts()
     {
         Text = Lang.T("set_title");
-        for (int i = 0; i < 5; i++) nav[i].Text = Lang.T(NavKeys[i]);
+        for (int i = 0; i < TABS; i++) nav[i].Text = Lang.T(NavKeys[i]);
         lSideVer.Text = Lang.T("lbl_version", App.Version);
         bSave.Text = Lang.T("set_save");
         bClose.Text = Lang.T("set_close");
@@ -502,9 +825,13 @@ class SettingsForm : Form
         tPopup.Text = Lang.T("set_popup");
         tVolume.Text = Lang.T("set_volume");
         tAuto.Text = Lang.T("set_auto");
+        tFollow.Text = Lang.T("set_follow");
+        tDodge.Text = Lang.T("set_dodge");
+        tWaves.Text = Lang.T("set_waves");
 
         hControls.Text = Lang.T("tab_controls");
         lHint.Text = Lang.T("hk_hint");
+        lVolStep.Text = Lang.T("set_volstep");
         for (int i = 0; i < HK; i++) hkLabels[i].Text = Lang.T(HkText[i]);
 
         hConn.Text = Lang.T("tab_connections");
@@ -516,6 +843,34 @@ class SettingsForm : Form
         lSpId.Text = Lang.T("set_spid");
         lSpHint.Text = Lang.T("set_spid_hint");
         bCopy.Text = Lang.T("set_copy");
+
+        hStr.Text = Lang.T("tab_streamer");
+        lStrInfo.Text = Lang.T("str_info");
+        gStrFile.Text = Lang.T("str_grp_file").ToUpper();
+        tStrFile.Text = Lang.T("str_file");
+        lStrFmt.Text = Lang.T("str_format");
+        lStrPath.Text = Lang.T("str_path", Streamer.FilePath);
+        bStrFolder.Text = Lang.T("str_folder");
+        gStrWeb.Text = Lang.T("str_grp_web").ToUpper();
+        tStrWeb.Text = Lang.T("str_web");
+        lStrUrl.Text = Streamer.Url;
+        bStrCopy.Text = Lang.T("set_copy");
+        lStrHint.Text = Lang.T("str_hint");
+
+        hProf.Text = Lang.T("tab_profiles");
+        lProfInfo.Text = Lang.T("prof_info");
+        lProfApp.Text = Lang.T("prof_app");
+        bProfAdd.Text = Lang.T("prof_add");
+        bProfDel.Text = Lang.T("prof_del");
+        gProfEdit.Text = Lang.T("prof_grp").ToUpper();
+        lProfSize.Text = Lang.T("set_size");
+        lProfOp.Text = Lang.T("prof_op");
+        tProfPopup.Text = Lang.T("set_popup");
+        tProfClick.Text = Lang.T("prof_click");
+        tProfVol.Text = Lang.T("set_volume");
+        bProfPos.Text = Lang.T("prof_pos_now");
+        bProfPosClear.Text = Lang.T("prof_pos_clear");
+        ProfShow();
 
         hUpd.Text = Lang.T("tab_updates");
         lVersion.Text = Lang.T("set_version", App.Version);
@@ -534,6 +889,8 @@ class SettingsForm : Form
         bIssue.Text = Lang.T("set_issue");
         bIssue.Visible = Contact.GitHub.Length > 0;
         bTour.Text = Lang.T("set_tour");
+        bDonate.Text = Lang.T("set_donate");
+        bDonate.Visible = Contact.HasDonate;
         lGuide.Text = Lang.T("set_guide").ToUpper();
         FillGuide();
     }
@@ -560,6 +917,19 @@ class SettingsForm : Form
                 rtb.SelectedText = line + "\n";
             }
         }
+        if (Contact.HasDonate)
+        {
+            rtb.SelectionStart = rtb.TextLength;
+            rtb.SelectionLength = 0;
+            rtb.SelectionFont = new Font("Segoe UI", 10.5f, FontStyle.Bold);
+            rtb.SelectionColor = GREEN;
+            rtb.SelectedText = "\n" + Lang.T("donate_head") + "\n";
+            rtb.SelectionStart = rtb.TextLength;
+            rtb.SelectionLength = 0;
+            rtb.SelectionFont = new Font("Segoe UI", 9.5f, FontStyle.Regular);
+            rtb.SelectionColor = Color.FromArgb(215, 215, 215);
+            rtb.SelectedText = Lang.T("donate_text") + "\n";
+        }
         rtb.Select(0, 0);
     }
 
@@ -572,6 +942,13 @@ class SettingsForm : Form
         Config.Discord = tDiscord.Checked;
         Config.DiscordCover = tCover.Checked;
         Config.AutoUpdate = tUpdate.Checked;
+        Config.Follow = tFollow.Checked;
+        Config.StreamFile = tStrFile.Checked;
+        Config.StreamWeb = tStrWeb.Checked;
+        Config.StreamFormat = tStrFmt.Text;
+        Config.Dodge = tDodge.Checked;
+        Config.Waves = tWaves.Checked;
+        Config.VolStep = slVolStep.Value;
         Config.SpotifyId = tSpId.Text.Trim();
         for (int i = 0; i < HK; i++) Config.Hk[i] = hkBoxes[i].Text;
         dirty = true;

@@ -125,6 +125,8 @@ class Overlay : Form
 {
     [DllImport("user32.dll")]
     static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")]
+    static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
     static extern int GetWindowLong(IntPtr h, int index);
     [DllImport("user32.dll", EntryPoint = "SetWindowLong")]
@@ -171,6 +173,15 @@ class Overlay : Form
     System.Windows.Forms.Timer hideTimer;
     DateTime lastToggle = DateTime.MinValue;
     public bool Exiting = false;
+    bool followHidden = false;                         // vom Modus "folgt Spotify" versteckt
+    static readonly string OwnExe = Path.GetFileNameWithoutExtension(Application.ExecutablePath);
+    string wFgExe = "", wFgTitle = "";                 // vorderstes Fenster (vom Hintergrund-Thread)
+    GameProfile activeProfile = null;                  // gerade aktives Spiele-Profil
+    bool baseClick = false;
+    bool dodged = false;                               // Ausweich-Modus: gerade durchsichtig
+    volatile float wavePeak = 0f;                      // Pegel fuer die Mini-Wellen
+    bool waveActive = false;
+    DateTime startedAt = DateTime.Now;
 
     // Werte, die der Hintergrund-Thread liefert
     readonly object stateLock = new object();
@@ -339,6 +350,7 @@ class Overlay : Form
             {
                 cover = rounded;
                 RebuildCover();
+                Streamer.SetCover(cover);
                 if (ad)
                 {
                     List<string> parts = new List<string>();
@@ -396,9 +408,29 @@ class Overlay : Form
                 }
                 float v = -1f;
                 bool readVol = Config.Volume && !volDrag && DateTime.Now >= nextVol;
-                if (readVol) { v = SpotifyAudio.Get(); nextVol = DateTime.Now.AddSeconds(2); }
+                if (readVol) { v = SpotifyAudio.Get(); nextVol = DateTime.Now.AddMilliseconds(600); }
+                string fgExe = "", fgTitle = "";
+                if (GameProfiles.Any)
+                {
+                    try
+                    {
+                        IntPtr fgWin = GetForegroundWindow();
+                        if (fgWin != IntPtr.Zero)
+                        {
+                            int fgPid;
+                            GetWindowThreadProcessId(fgWin, out fgPid);
+                            StringBuilder fgSb = new StringBuilder(256);
+                            GetWindowText(fgWin, fgSb, 256);
+                            fgTitle = fgSb.ToString();
+                            using (Process fgProc = Process.GetProcessById(fgPid)) fgExe = fgProc.ProcessName;
+                        }
+                    }
+                    catch { }
+                }
                 lock (stateLock)
                 {
+                    wFgExe = fgExe;
+                    wFgTitle = fgTitle;
                     wRunning = r;
                     wSmtc = sok;
                     wTitle = st;
@@ -416,6 +448,127 @@ class Overlay : Form
         }
     }
 
+    // ---------- Mini-Wellen ----------
+    Rectangle WaveRect()
+    {
+        return new Rectangle((int)(6 * scale), (int)(62 * scale), (int)(46 * scale), (int)(22 * scale));
+    }
+
+    void WaveLoop()
+    {
+        while (!Exiting)
+        {
+            Thread.Sleep(80);
+            try
+            {
+                bool on = Config.Waves && Config.Volume && playing && !isAd && Visible;
+                if (!on)
+                {
+                    if (waveActive)
+                    {
+                        waveActive = false;
+                        wavePeak = 0f;
+                        BeginInvoke(new Action(delegate { Invalidate(WaveRect()); }));
+                    }
+                    continue;
+                }
+                waveActive = true;
+                wavePeak = SpotifyAudio.Peak();
+                BeginInvoke(new Action(delegate { Invalidate(WaveRect()); }));
+            }
+            catch { }
+        }
+    }
+
+    void DrawWaves(Graphics g)
+    {
+        float s = scale;
+        double ph = DateTime.Now.Ticks / 10000000.0 * 9.0;
+        float lvl = (float)Math.Min(1.0, Math.Sqrt(wavePeak) * 1.25);
+        using (SolidBrush b = new SolidBrush(GREEN))
+            for (int i = 0; i < 6; i++)
+            {
+                float f = (float)(0.35 + 0.65 * Math.Abs(Math.Sin(ph + i * 1.3)));
+                float h = Math.Max(1.5f * s, 13f * s * lvl * f);
+                g.FillRectangle(b, (10 + i * 6.2f) * s, 80f * s - h, 3.4f * s, h);
+            }
+    }
+
+    // ---------- Ausweich-Modus ----------
+    void UpdateDodge()
+    {
+        bool want = Config.Dodge && Visible && !dragging && !resizing && !volDrag && !seeking && Bounds.Contains(Cursor.Position);
+        if (want == dodged) return;
+        dodged = want;
+        Opacity = want ? 0.15 : Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0));
+    }
+
+    // ---------- Spiele-Profile ----------
+    // Passt das vorderste Programm zu einem Profil, wird es uebernommen; beim Verlassen geht alles zurueck.
+    void ApplyProfiles()
+    {
+        try
+        {
+            if (!GameProfiles.Any && activeProfile == null) return;
+            string fe, ft;
+            lock (stateLock) { fe = wFgExe; ft = wFgTitle; }
+            bool editing = settings != null && !settings.IsDisposed && settings.Visible;
+            GameProfile m = null;
+            if (!editing)
+            {
+                if (fe.Length == 0) return;
+                if (string.Equals(fe, OwnExe, StringComparison.OrdinalIgnoreCase)) return;   // Overlay selbst: nichts aendern
+                m = GameProfiles.Find(fe, ft);
+            }
+            SwitchProfile(m);
+        }
+        catch { }
+    }
+
+    void SwitchProfile(GameProfile m)
+    {
+        if (m == activeProfile) return;
+        if (m != null)
+        {
+            if (activeProfile == null)
+            {
+                Config.BaseScale = ScalePercent;
+                Config.BaseOpacity = Config.Opacity;
+                Config.BasePopup = Config.Popup;
+                Config.BaseVolume = Config.Volume;
+                Config.BaseX = Left;
+                Config.BaseY = Top;
+                baseClick = clickThrough;
+                Config.ProfileOn = true;
+            }
+            activeProfile = m;
+            PreviewScale(m.Scale);
+            Config.Opacity = m.Opacity;
+            Config.Popup = m.Popup;
+            Config.Volume = m.Volume;
+            ApplySettings();
+            if (m.HasPos)
+            {
+                Point pp = new Point(m.X, m.Y);
+                foreach (Screen sc in Screen.AllScreens)
+                    if (sc.WorkingArea.Contains(pp)) { Location = pp; break; }
+            }
+            if (clickThrough != m.Click) SetClickThrough(m.Click);
+        }
+        else
+        {
+            activeProfile = null;
+            Config.ProfileOn = false;
+            PreviewScale(Config.BaseScale);
+            Config.Opacity = Config.BaseOpacity;
+            Config.Popup = Config.BasePopup;
+            Config.Volume = Config.BaseVolume;
+            ApplySettings();
+            if (Config.BaseX != int.MinValue) Location = new Point(Config.BaseX, Config.BaseY);
+            if (clickThrough != baseClick) SetClickThrough(baseClick);
+        }
+    }
+
     void VolumeLoop()
     {
         while (!Exiting)
@@ -429,6 +582,7 @@ class Overlay : Form
     // ---------- Aufbau ----------
     public Overlay()
     {
+        GameProfiles.Load();
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         FormBorderStyle = FormBorderStyle.None;
         TopMost = true;
@@ -487,6 +641,9 @@ class Overlay : Form
         Thread vt = new Thread(VolumeLoop);
         vt.IsBackground = true;
         vt.Start();
+        Thread wvt = new Thread(WaveLoop);
+        wvt.IsBackground = true;
+        wvt.Start();
 
         ApplyScale(scale);
         if (Config.Popup) hideTimer.Start();
@@ -511,6 +668,7 @@ class Overlay : Form
 
     void OpenSettings()
     {
+        SwitchProfile(null);   // in den Einstellungen gilt immer der normale Stand
         if (settings == null || settings.IsDisposed) settings = new SettingsForm(this);
         settings.Show();
         settings.Activate();
@@ -528,8 +686,25 @@ class Overlay : Form
         {
             lyrics = new LyricsForm(this);
             lyrics.Show();
+            ApplyLyricsClickThrough();
         }
         Invalidate();
+    }
+
+    // Im Durchklickbar-Modus geht das Songtext-Fenster auch fuer die Maus durch
+    void ApplyLyricsClickThrough()
+    {
+        try
+        {
+            if (lyrics != null && !lyrics.IsDisposed && lyrics.IsHandleCreated)
+            {
+                int ex = GetWindowLong(lyrics.Handle, -20);
+                ex = clickThrough ? (ex | 0x20) : (ex & ~0x20);
+                SetWindowLong(lyrics.Handle, -20, ex);
+                lyrics.Invalidate();
+            }
+        }
+        catch { }
     }
 
     // Durchklickbar: Mausklicks gehen durch das Overlay hindurch zum Spiel
@@ -544,8 +719,8 @@ class Overlay : Form
         }
         catch { }
         BuildMenu();
+        ApplyLyricsClickThrough();
         Invalidate();
-        Balloon(Lang.T(on ? "ct_on" : "ct_off"));
     }
 
     public void ShowWelcome()
@@ -590,6 +765,7 @@ class Overlay : Form
         if (lyrics != null && !lyrics.IsDisposed) lyrics.ApplyOpacity();
         BuildMenu();
         ApplyScale(scale);
+        if (!Config.Follow) followHidden = false;
         if (Config.Popup) ShowPopup();
         else { hideTimer.Stop(); if (!Visible) Visible = true; }
         rpc.Reset();
@@ -829,6 +1005,8 @@ class Overlay : Form
                     g.FillEllipse(k, bx + bw * frac - 4 * s, by + bh / 2 - 4 * s, 8 * s, 8 * s);
         }
 
+        if (Config.Waves && Config.Volume && wavePeak > 0.001f) DrawWaves(g);
+
         for (int i = 0; i < 3; i++) DrawBtn(g, i, BtnRect(i), hoverBtn == i, playing);
         DrawLyrics(g, BtnRect(3), hoverBtn == 3, lyrics != null && !lyrics.IsDisposed);
         DrawList(g, BtnRect(4), hoverBtn == 4);
@@ -1027,8 +1205,8 @@ class Overlay : Form
 
     void HotKeyPressed(int id)
     {
-        if (id == 1) ChangeVol(0.05f);
-        else if (id == 2) ChangeVol(-0.05f);
+        if (id == 1) ChangeVol(Config.VolStep / 100f);
+        else if (id == 2) ChangeVol(-Config.VolStep / 100f);
         else if (id == 3) Cmd("next", CMD_NEXT);
         else if (id == 4) Cmd("prev", CMD_PREV);
         else if (id == 5) Cmd("play", CMD_PLAY);
@@ -1082,6 +1260,7 @@ class Overlay : Form
         try { if (lyrics != null && !lyrics.IsDisposed) lyrics.Close(); } catch { }
         SavePosition();
         rpc.Close();
+        try { Streamer.Stop(); } catch { }
         try { HotKeys.Remove(Handle); } catch { }
         try { tray.Visible = false; tray.Dispose(); } catch { }
         try { if (host != null) host.Close(); } catch { }
@@ -1129,6 +1308,24 @@ class Overlay : Form
         bool changed = false;
         if (r != running) { running = r; changed = true; }
         bool hold = DateTime.Now < holdPlayUntil;   // gerade selbst auf Play/Pause geklickt
+
+        // Overlay folgt Spotify: zeigen, wenn Spotify laeuft, verstecken, wenn es zu ist
+        if (Config.Follow && !Exiting && (DateTime.Now - startedAt).TotalSeconds > 3)
+        {
+            if (!r)
+            {
+                if (Visible) { followHidden = true; Visible = false; }
+            }
+            else if (followHidden)
+            {
+                followHidden = false;
+                if (!Visible && !Config.Popup)
+                {
+                    Visible = true;
+                    SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0013);
+                }
+            }
+        }
 
         if (!r)
         {
@@ -1212,6 +1409,9 @@ class Overlay : Form
         if (changed) Invalidate();
 
         rpc.Update(Config.Discord, DiscordRpc.DefaultId, trackTitle, trackArtist, playing && !isAd, posSec, durSec, running && hasSong && !isAd, Config.DiscordCover);
+        Streamer.Update(trackTitle, trackArtist, playing, running && hasSong && !isAd, posSec, durSec);
+        ApplyProfiles();
+        UpdateDodge();
     }
 
     [STAThread]

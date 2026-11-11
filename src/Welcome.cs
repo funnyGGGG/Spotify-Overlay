@@ -101,7 +101,9 @@ class WelcomeForm : Form
 
             string n = (page + 1).ToString();
             g.DrawString(Lang.T("tour" + n + "_t"), f3, white, new RectangleF(236, 60, 380, 80));
-            g.DrawString(Lang.T("tour" + n + "_x"), f4, grey, new RectangleF(236, 150, 380, 140));
+            string tx = Lang.T("tour" + n + "_x");
+            if (page == Pages - 1 && Contact.HasDonate) tx += "\n\n" + Lang.T("donate_tour");
+            g.DrawString(tx, f4, grey, new RectangleF(236, 150, 380, 140));
 
             for (int i = 0; i < Pages; i++)
             {

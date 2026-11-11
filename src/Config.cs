@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 static class App
 {
-    public const string Version = "1.18";
+    public const string Version = "1.19";
 }
 
 // Einstellungen, liegen in der Registry unter HKCU\Software\SpotifyOverlay
@@ -21,6 +21,21 @@ static class Config
     public static bool AutoUpdate = true;
     public static bool DiscordCover = true;
     public static bool Welcome = false;
+    public static bool Follow = false;          // Overlay folgt Spotify (zeigen/verstecken)
+    public static bool StreamFile = false;      // Songtext in eine Datei schreiben
+    public static bool StreamWeb = false;       // kleine Webseite fuer OBS
+    public static string StreamFormat = "{artist} - {title}";
+    public static string MyPlaylists = "";      // eigene Playlist-Links (ohne Anmeldung)
+    public static bool Dodge = false;           // Ausweich-Modus
+    public static bool Waves = false;           // Mini-Wellen
+    public static int VolStep = 5;              // Lautstaerke-Schritt der Tastenkuerzel in Prozent
+    public static string Profiles = "";         // Spiele-Profile (siehe GameProfiles.cs)
+
+    // Solange ein Spiele-Profil aktiv ist, steht hier der normale Stand.
+    // Config.Save() speichert dann den normalen Stand und nicht die Werte des Profils.
+    public static bool ProfileOn = false;
+    public static int BaseScale = 100, BaseOpacity = 70, BaseX = int.MinValue, BaseY = int.MinValue;
+    public static bool BasePopup = false, BaseVolume = true;
     public static string DiscordId = "";
     public static string SpotifyId = "";
     // Tastenkuerzel: Lauter, Leiser, Weiter, Zurueck, Play/Pause, Overlay ein/aus
@@ -54,6 +69,16 @@ static class Config
                     AutoUpdate = GetInt(k, "AutoUpdate", 1) == 1;
                     DiscordCover = GetInt(k, "DiscordCover", 1) == 1;
                     Welcome = GetInt(k, "Welcome", 0) == 1;
+                    Follow = GetInt(k, "FollowSpotify", 0) == 1;
+                    StreamFile = GetInt(k, "StreamFile", 0) == 1;
+                    StreamWeb = GetInt(k, "StreamWeb", 0) == 1;
+                    StreamFormat = (k.GetValue("StreamFormat") as string) ?? "{artist} - {title}";
+                    MyPlaylists = (k.GetValue("MyPlaylists") as string) ?? "";
+                    Dodge = GetInt(k, "Dodge", 0) == 1;
+                    Waves = GetInt(k, "Waves", 0) == 1;
+                    VolStep = GetInt(k, "VolStep", 5);
+                    if (VolStep < 1 || VolStep > 25) VolStep = 5;
+                    Profiles = (k.GetValue("Profiles") as string) ?? "";
                     LyX = GetInt(k, "LyX", int.MinValue);
                     LyY = GetInt(k, "LyY", int.MinValue);
                     LyW = GetInt(k, "LyW", 380);
@@ -72,6 +97,12 @@ static class Config
 
     public static void Save()
     {
+        int sOp = Opacity, sSc = Scale, sX = X, sY = Y;
+        bool sPo = Popup, sVo = Volume;
+        if (ProfileOn)
+        {
+            Opacity = BaseOpacity; Scale = BaseScale; X = BaseX; Y = BaseY; Popup = BasePopup; Volume = BaseVolume;
+        }
         try
         {
             using (RegistryKey k = Registry.CurrentUser.CreateSubKey(Key))
@@ -85,6 +116,15 @@ static class Config
                 k.SetValue("AutoUpdate", AutoUpdate ? 1 : 0);
                 k.SetValue("DiscordCover", DiscordCover ? 1 : 0);
                 k.SetValue("Welcome", Welcome ? 1 : 0);
+                k.SetValue("FollowSpotify", Follow ? 1 : 0);
+                k.SetValue("StreamFile", StreamFile ? 1 : 0);
+                k.SetValue("StreamWeb", StreamWeb ? 1 : 0);
+                k.SetValue("StreamFormat", StreamFormat ?? "");
+                k.SetValue("MyPlaylists", MyPlaylists ?? "");
+                k.SetValue("Dodge", Dodge ? 1 : 0);
+                k.SetValue("Waves", Waves ? 1 : 0);
+                k.SetValue("VolStep", VolStep);
+                k.SetValue("Profiles", Profiles ?? "");
                 if (LyX != int.MinValue) k.SetValue("LyX", LyX);
                 if (LyY != int.MinValue) k.SetValue("LyY", LyY);
                 k.SetValue("LyW", LyW);
@@ -97,5 +137,9 @@ static class Config
             }
         }
         catch { }
+        finally
+        {
+            Opacity = sOp; Scale = sSc; X = sX; Y = sY; Popup = sPo; Volume = sVo;
+        }
     }
 }

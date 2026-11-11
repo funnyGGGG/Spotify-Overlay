@@ -59,7 +59,9 @@ class UpdateForm : Form
         tNotes.BackColor = Color.FromArgb(34, 34, 34);
         tNotes.ForeColor = Color.White;
         tNotes.BorderStyle = BorderStyle.None;
-        tNotes.Text = string.IsNullOrEmpty(info.Notes) ? "" : Lang.T("upd_notes") + ":\r\n" + info.Notes.Replace("\n", "\r\n");
+        string notesText = string.IsNullOrEmpty(info.Notes) ? "" : Lang.T("upd_notes") + ":\r\n" + info.Notes.Replace("\n", "\r\n");
+        if (Contact.HasDonate) notesText += (notesText.Length > 0 ? "\r\n\r\n" : "") + Lang.T("donate_update") + "\r\n" + Contact.Donate;
+        tNotes.Text = notesText;
         Controls.Add(tNotes);
 
         lStatus = new Label();
