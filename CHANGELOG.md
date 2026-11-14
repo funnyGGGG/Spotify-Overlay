@@ -1,6 +1,29 @@
 # Changelog / Änderungen
 
-## 1.19
+## 1.20
+- **EN:** New option "Hide the background": the dark background becomes invisible and only text, cover and buttons stay visible. It works together with the opacity slider.
+- **DE:** Neue Option "Hintergrund ausblenden": Der dunkle Hintergrund wird unsichtbar, nur Text, Cover und Knöpfe bleiben sichtbar. Sie funktioniert zusammen mit dem Deckkraft-Regler.
+- **EN:** Discord: a "Reconnect" button, a more detailed status and a short checklist in the settings.
+- **DE:** Discord: ein Knopf "Neu verbinden", ein genauerer Status und eine kurze Checkliste in den Einstellungen.
+- **EN:** The volume slider now follows Spotify's volume about four times per second.
+- **DE:** Der Lautstärkeregler folgt der Lautstärke von Spotify jetzt etwa viermal pro Sekunde.
+- **EN:** Game profiles can only be created for programs that are open right now. Pick one from the list.
+- **DE:** Spiel-Profile gibt es nur für Programme, die gerade offen sind. Du wählst sie aus einer Liste.
+- **EN:** Several donation links are possible. Put one link per line in donate.txt as Name|https://... and the Donate button shows a small menu.
+- **DE:** Mehrere Spenden-Links sind möglich. Pro Zeile ein Link in donate.txt als Name|https://... und der Button "Spenden" zeigt ein kleines Menü.
+- **EN:** The OBS browser page looks like the app now (cover, title, artist, progress, times) and always shows "Spotify Overlay by funny.games".
+- **DE:** Die OBS-Browserseite sieht jetzt aus wie die App (Cover, Titel, Interpret, Fortschritt, Zeiten) und zeigt immer "Spotify Overlay by funny.games".
+- **EN:** New option "Screen sharing": the overlay shows up as a window in Discord's window list (restart needed). The window now has the title "Spotify Overlay".
+- **DE:** Neue Option "Bildschirm teilen": Das Overlay erscheint als Fenster in der Fensterliste von Discord (Neustart nötig). Das Fenster heißt jetzt "Spotify Overlay".
+- **EN:** Song change animation: a small card with cover, title and artist slides in for a new song (off by default).
+- **DE:** Songwechsel-Animation: Bei einem neuen Song gleitet kurz eine kleine Karte mit Cover, Titel und Interpret herein (standardmäßig aus).
+- **EN:** Advanced transparency (restart needed): the background can be more see-through than text and cover, with its own opacity slider.
+- **DE:** Erweiterte Transparenz (Neustart nötig): Der Hintergrund kann durchsichtiger sein als Text und Cover, mit eigenem Deckkraft-Regler.
+- **EN:** Switch version: load the list of versions in Settings -> Updates and install an older or other version if one is buggy.
+- **DE:** Version wechseln: In Einstellungen -> Updates die Liste der Versionen laden und eine ältere oder andere Version installieren, wenn eine Fehler hat.
+- **EN:** If the connection to Spotify's service fails, the app now tries again automatically once.
+- **DE:** Schlägt die Verbindung zum Spotify-Dienst fehl, versucht die App es jetzt automatisch noch einmal.
+
 - **EN:** Click-through mode no longer shows a Windows notification. The orange frame shows that it is on.
 - **DE:** Der Durchklickbar-Modus zeigt keine Windows-Benachrichtigung mehr. Der orange Rahmen zeigt, dass er an ist.
 - **EN:** New setting "Follow Spotify": the overlay shows while Spotify is running and hides when Spotify is closed.
