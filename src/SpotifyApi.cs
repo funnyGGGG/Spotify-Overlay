@@ -210,7 +210,15 @@ static class SpotifyApi
 
     static string Call(string method, string url, string body, out int status)
     {
-        string result = Send(method, url, body, out status);
+        string result;
+        try { result = Send(method, url, body, out status); }
+        catch (Exception)
+        {
+            // Verbindungsproblem: kurz warten und automatisch noch einmal verbinden
+            System.Threading.Thread.Sleep(1500);
+            accessToken = "";
+            result = Send(method, url, body, out status);
+        }
         if (status == 401)
         {
             // Token abgelaufen: einmal neu holen und wiederholen

@@ -150,8 +150,15 @@ class Overlay : Form
     static readonly int[] BtnX = { 226, 250, 274 };
     static readonly string[] AdWords = { "advertisement", "werbung", "anuncio", "publicidad", "publicité", "publicite", "pubblicità", "pubblicita", "reclame" };
     static readonly Color BG = Color.FromArgb(24, 24, 24);
+    static readonly Color KEY = Color.FromArgb(24, 24, 25);   // fast wie BG, wird bei "Hintergrund ausblenden" durchsichtig
     static readonly Color GREEN = Color.FromArgb(29, 185, 84);
     static readonly Color ACC = Color.FromArgb(232, 120, 40);
+    bool pp = Config.PerPixel;          // erweiterte Transparenz (Alpha pro Pixel), gilt ab dem Start
+    double ppOpacity = 1.0;
+    bool ppQueued = false;
+    SongToast toast = null;
+    bool toastPending = false;
+    DateTime toastAt = DateTime.MinValue;
 
     // Fenster und Helfer
     NotifyIcon tray;
@@ -220,7 +227,8 @@ class Overlay : Form
         get
         {
             CreateParams cp = base.CreateParams;
-            cp.ExStyle |= 0x08000000 | 0x80;   // NOACTIVATE + TOOLWINDOW: nimmt dem Spiel nie den Fokus
+            cp.ExStyle |= Config.Capturable ? 0x08000000 : (0x08000000 | 0x80);   // NOACTIVATE (+ TOOLWINDOW): nimmt dem Spiel nie den Fokus
+            if (pp) cp.ExStyle |= 0x80000;   // LAYERED: Alpha pro Pixel
             return cp;
         }
     }
@@ -448,6 +456,43 @@ class Overlay : Form
         }
     }
 
+    // ---------- Animation bei neuem Song ----------
+    void ShowToast()
+    {
+        try
+        {
+            if (!Config.Toast || isAd || !hasSong || Config.Popup) return;
+            if (toast != null && !toast.IsDisposed) toast.Close();
+            Image c = null;
+            try { c = new Bitmap(cover); } catch { }
+            toast = new SongToast(c, trackTitle, trackArtist, BG, ACC, Color.White, Color.FromArgb(165, 165, 165));
+            toast.Start();
+        }
+        catch { }
+    }
+
+    // ---------- Lautstaerke von Spotify schnell mitlesen (ca. 4x pro Sekunde) ----------
+    void VolSyncLoop()
+    {
+        while (!Exiting)
+        {
+            Thread.Sleep(250);
+            try
+            {
+                if (!Config.Volume || volDrag || !running) continue;
+                float v = SpotifyAudio.Get();
+                if (v >= 0f) wVol = v;
+            }
+            catch { }
+        }
+    }
+
+    public void ReconnectDiscord()
+    {
+        DiscordRpc.Status = "reconnecting ...";
+        rpc.Reconnect();
+    }
+
     // ---------- Mini-Wellen ----------
     Rectangle WaveRect()
     {
@@ -500,7 +545,7 @@ class Overlay : Form
         bool want = Config.Dodge && Visible && !dragging && !resizing && !volDrag && !seeking && Bounds.Contains(Cursor.Position);
         if (want == dodged) return;
         dodged = want;
-        Opacity = want ? 0.15 : Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0));
+        SetOpacity(want ? 0.15 : Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0)));
     }
 
     // ---------- Spiele-Profile ----------
@@ -587,10 +632,12 @@ class Overlay : Form
         FormBorderStyle = FormBorderStyle.None;
         TopMost = true;
         ShowInTaskbar = false;
+        Text = "Spotify Overlay";
         BackColor = BG;
         StartPosition = FormStartPosition.Manual;
         scale = Config.Scale / 100f;
-        Opacity = Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0));
+        SetOpacity(Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0)));
+        if (!pp) TransparencyKey = Config.BgOff ? KEY : Color.Empty;
         Location = new Point(Screen.PrimaryScreen.WorkingArea.Right - (int)(BaseW * scale) - 20, 20);
         if (Config.X != int.MinValue && Config.Y != int.MinValue)
         {
@@ -644,6 +691,9 @@ class Overlay : Form
         Thread wvt = new Thread(WaveLoop);
         wvt.IsBackground = true;
         wvt.Start();
+        Thread vst = new Thread(VolSyncLoop);
+        vst.IsBackground = true;
+        vst.Start();
 
         ApplyScale(scale);
         if (Config.Popup) hideTimer.Start();
@@ -761,7 +811,9 @@ class Overlay : Form
     // Wird von den Einstellungen aufgerufen
     public void ApplySettings()
     {
-        Opacity = Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0));
+        SetOpacity(Math.Max(0.2, Math.Min(1.0, Config.Opacity / 100.0)));
+        if (!pp) TransparencyKey = Config.BgOff ? KEY : Color.Empty;
+        Invalidate();
         if (lyrics != null && !lyrics.IsDisposed) lyrics.ApplyOpacity();
         BuildMenu();
         ApplyScale(scale);
@@ -941,7 +993,7 @@ class Overlay : Form
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.InterpolationMode = InterpolationMode.HighQualityBilinear;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        g.Clear(BG);
+        g.Clear(pp ? Color.FromArgb(PpBgAlpha(), BG) : (Config.BgOff ? KEY : BG));
         if (fTitle == null) return;
 
         float s = scale;
@@ -1027,7 +1079,102 @@ class Overlay : Form
 
     protected override void OnPaint(PaintEventArgs e)
     {
+        if (pp) { PpRefresh(); return; }
         Render(e.Graphics);
+    }
+
+    // ---------- Erweiterte Transparenz (nur wenn eingeschaltet, Neustart noetig) ----------
+    // Das Fenster wird dann mit Alpha pro Pixel gezeichnet, so kann der Hintergrund
+    // durchsichtiger sein als Text und Cover.
+    [StructLayout(LayoutKind.Sequential)]
+    struct PpPoint { public int X, Y; public PpPoint(int x, int y) { X = x; Y = y; } }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PpSize { public int W, H; public PpSize(int w, int h) { W = w; H = h; } }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PpBlend { public byte Op, Flags, Alpha, Format; }
+
+    [DllImport("user32.dll", EntryPoint = "UpdateLayeredWindow", SetLastError = true)]
+    static extern bool PpUpdate(IntPtr hwnd, IntPtr hdcDst, ref PpPoint pptDst, ref PpSize psize, IntPtr hdcSrc, ref PpPoint pptSrc, int crKey, ref PpBlend pblend, int flags);
+    [DllImport("user32.dll", EntryPoint = "GetDC")]
+    static extern IntPtr PpGetDC(IntPtr h);
+    [DllImport("user32.dll", EntryPoint = "ReleaseDC")]
+    static extern int PpReleaseDC(IntPtr h, IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "CreateCompatibleDC")]
+    static extern IntPtr PpCreateDC(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "DeleteDC")]
+    static extern bool PpDeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "SelectObject")]
+    static extern IntPtr PpSelect(IntPtr dc, IntPtr obj);
+    [DllImport("gdi32.dll", EntryPoint = "DeleteObject")]
+    static extern bool PpDeleteObj(IntPtr obj);
+
+    static int PpBgAlpha()
+    {
+        if (Config.BgOff) return 0;
+        int a = (int)(Config.BgAlpha * 2.55);
+        return a < 0 ? 0 : (a > 255 ? 255 : a);
+    }
+
+    // Gesamt-Deckkraft: normal ueber Form.Opacity, mit Alpha pro Pixel ueber die Blend-Funktion
+    void SetOpacity(double v)
+    {
+        if (pp) { ppOpacity = v; PpRefresh(); }
+        else Opacity = v;
+    }
+
+    void PpRefresh()
+    {
+        if (!pp || !IsHandleCreated || Width < 1 || Height < 1) return;
+        try
+        {
+            using (Bitmap bmp = new Bitmap(Width, Height, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(bmp)) Render(g);
+                IntPtr screenDc = PpGetDC(IntPtr.Zero);
+                IntPtr memDc = PpCreateDC(screenDc);
+                IntPtr hBmp = IntPtr.Zero, old = IntPtr.Zero;
+                try
+                {
+                    hBmp = bmp.GetHbitmap(Color.FromArgb(0));
+                    old = PpSelect(memDc, hBmp);
+                    PpSize size = new PpSize(Width, Height);
+                    PpPoint src = new PpPoint(0, 0);
+                    PpPoint dst = new PpPoint(Left, Top);
+                    PpBlend blend = new PpBlend();
+                    blend.Op = 0;
+                    blend.Flags = 0;
+                    blend.Alpha = (byte)Math.Max(1, Math.Min(255, (int)(ppOpacity * 255)));
+                    blend.Format = 1;
+                    PpUpdate(Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, 2);
+                }
+                finally
+                {
+                    if (old != IntPtr.Zero) PpSelect(memDc, old);
+                    if (hBmp != IntPtr.Zero) PpDeleteObj(hBmp);
+                    PpDeleteDC(memDc);
+                    PpReleaseDC(IntPtr.Zero, screenDc);
+                }
+            }
+        }
+        catch { }
+    }
+
+    // Bei Alpha pro Pixel kommt kein normales Neuzeichnen: jede Aenderung stoesst das Bild neu an
+    protected override void OnInvalidated(InvalidateEventArgs e)
+    {
+        base.OnInvalidated(e);
+        if (pp && IsHandleCreated && !ppQueued)
+        {
+            ppQueued = true;
+            try { BeginInvoke(new Action(delegate { ppQueued = false; PpRefresh(); })); }
+            catch { ppQueued = false; }
+        }
+    }
+
+    protected override void OnVisibleChanged(EventArgs e)
+    {
+        base.OnVisibleChanged(e);
+        if (pp && Visible) PpRefresh();
     }
 
     // Bild fuer die Vorschau (Taskleiste, Alt+Tab).
@@ -1182,6 +1329,7 @@ class Overlay : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        PpRefresh();
         host = new TaskbarHost(this, appIcon);
         host.Show();
         SetWindowPos(Handle, (IntPtr)(-1), 0, 0, 0, 0, 0x0013);
@@ -1399,6 +1547,7 @@ class Overlay : Form
             posSec = 0; durSec = 0;
             adInfo = "";
             if (Config.Popup) ShowPopup();
+            if (Config.Toast && !Config.Popup && !isAd) { toastPending = true; toastAt = DateTime.Now.AddMilliseconds(1200); }
             if (host != null) host.RefreshThumb();
             Thread t2 = new Thread(LoadCover);
             t2.IsBackground = true;
@@ -1412,6 +1561,7 @@ class Overlay : Form
         Streamer.Update(trackTitle, trackArtist, playing, running && hasSong && !isAd, posSec, durSec);
         ApplyProfiles();
         UpdateDodge();
+        if (toastPending && DateTime.Now >= toastAt) { toastPending = false; ShowToast(); }
     }
 
     [STAThread]

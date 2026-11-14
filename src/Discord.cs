@@ -23,6 +23,7 @@ class DiscordRpc
     DateTime lastTry = DateTime.MinValue;
     bool busy = false;
     int level = 0;
+    int pipeIdx = -1;
     readonly object gate = new object();
 
     static string Esc(string s)
@@ -52,6 +53,15 @@ class DiscordRpc
     }
 
     public void Reset() { lastKey = "?"; }
+
+    // Neu verbinden: beim naechsten Durchlauf wird die Pipe neu aufgebaut und die Aktivitaet noch einmal gesendet
+    public void Reconnect()
+    {
+        connectedId = "";
+        level = 0;
+        lastTry = DateTime.MinValue;
+        lastKey = "?";
+    }
 
     string Frame(string activity)
     {
@@ -201,7 +211,7 @@ class DiscordRpc
                     if (!reply.Contains("\"evt\":\"ERROR\"")) { ok = true; level = l; }
                 }
                 if (!ok) throw new IOException(ErrorOf(reply));
-                if (active) Status = "OK - activity sent";
+                if (active) Status = "OK - activity sent (pipe " + pipeIdx + ")";
             }
             catch (Exception ex)
             {
@@ -224,6 +234,7 @@ class DiscordRpc
                 NamedPipeClientStream p = new NamedPipeClientStream(".", "discord-ipc-" + i, PipeDirection.InOut);
                 p.Connect(250);
                 pipe = p;
+                pipeIdx = i;
                 break;
             }
             catch { }

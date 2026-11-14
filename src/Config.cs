@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 static class App
 {
-    public const string Version = "1.19";
+    public const string Version = "1.20";
 }
 
 // Einstellungen, liegen in der Registry unter HKCU\Software\SpotifyOverlay
@@ -27,6 +27,11 @@ static class Config
     public static string StreamFormat = "{artist} - {title}";
     public static string MyPlaylists = "";      // eigene Playlist-Links (ohne Anmeldung)
     public static bool Dodge = false;           // Ausweich-Modus
+    public static bool BgOff = false;           // Hintergrund unsichtbar, nur Inhalt bleibt
+    public static bool Toast = false;           // Animation bei neuem Song
+    public static bool PerPixel = false;        // erweiterte Transparenz (Alpha pro Pixel), nach Neustart
+    public static int BgAlpha = 100;            // Deckkraft des Hintergrunds in Prozent (nur mit erweiterter Transparenz)
+    public static bool Capturable = false;      // Overlay als Fenster teilbar (Discord, OBS), nach Neustart
     public static bool Waves = false;           // Mini-Wellen
     public static int VolStep = 5;              // Lautstaerke-Schritt der Tastenkuerzel in Prozent
     public static string Profiles = "";         // Spiele-Profile (siehe GameProfiles.cs)
@@ -75,6 +80,12 @@ static class Config
                     StreamFormat = (k.GetValue("StreamFormat") as string) ?? "{artist} - {title}";
                     MyPlaylists = (k.GetValue("MyPlaylists") as string) ?? "";
                     Dodge = GetInt(k, "Dodge", 0) == 1;
+                    BgOff = GetInt(k, "BgOff", 0) == 1;
+                    Toast = GetInt(k, "Toast", 0) == 1;
+                    PerPixel = GetInt(k, "PerPixel", 0) == 1;
+                    BgAlpha = GetInt(k, "BgAlpha", 100);
+                    if (BgAlpha < 0 || BgAlpha > 100) BgAlpha = 100;
+                    Capturable = GetInt(k, "Capturable", 0) == 1;
                     Waves = GetInt(k, "Waves", 0) == 1;
                     VolStep = GetInt(k, "VolStep", 5);
                     if (VolStep < 1 || VolStep > 25) VolStep = 5;
@@ -122,6 +133,11 @@ static class Config
                 k.SetValue("StreamFormat", StreamFormat ?? "");
                 k.SetValue("MyPlaylists", MyPlaylists ?? "");
                 k.SetValue("Dodge", Dodge ? 1 : 0);
+                k.SetValue("BgOff", BgOff ? 1 : 0);
+                k.SetValue("Toast", Toast ? 1 : 0);
+                k.SetValue("PerPixel", PerPixel ? 1 : 0);
+                k.SetValue("BgAlpha", BgAlpha);
+                k.SetValue("Capturable", Capturable ? 1 : 0);
                 k.SetValue("Waves", Waves ? 1 : 0);
                 k.SetValue("VolStep", VolStep);
                 k.SetValue("Profiles", Profiles ?? "");

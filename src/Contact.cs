@@ -1,4 +1,6 @@
 // Spotify Overlay - funny.games
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 
@@ -33,19 +35,36 @@ static class Contact
         }
     }
 
-    // Freiwillige Spenden: Link steht in donate.txt. Solange dort DEIN-LINK steht, wird nichts angezeigt.
-    public static string Donate
+    // Freiwillige Spenden: Links stehen in donate.txt, eine Zeile pro Link: Name|https://...
+    // Zeilen mit DEIN-LINK werden ignoriert. Solange es keinen echten Link gibt, wird nichts angezeigt.
+    public static List<KeyValuePair<string, string>> DonateLinks()
     {
-        get { return Read("donate.txt"); }
+        List<KeyValuePair<string, string>> l = new List<KeyValuePair<string, string>>();
+        foreach (string raw in Read("donate.txt").Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line.Contains("DEIN-LINK")) continue;
+            string name = "", url = line;
+            int bar = line.IndexOf('|');
+            if (bar > 0)
+            {
+                name = line.Substring(0, bar).Trim();
+                url = line.Substring(bar + 1).Trim();
+            }
+            if (!url.StartsWith("http")) continue;
+            if (name.Length == 0)
+            {
+                try { name = new Uri(url).Host; }
+                catch { name = url; }
+            }
+            l.Add(new KeyValuePair<string, string>(name, url));
+        }
+        return l;
     }
 
     public static bool HasDonate
     {
-        get
-        {
-            string d = Donate;
-            return d.StartsWith("http") && !d.Contains("DEIN-LINK");
-        }
+        get { return DonateLinks().Count > 0; }
     }
 
     public static string GitHub

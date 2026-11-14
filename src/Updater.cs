@@ -78,6 +78,46 @@ static class Updater
         return true;
     }
 
+    // Die letzten Versionen (fuer "Version wechseln")
+    public static List<UpdateInfo> Recent()
+    {
+        List<UpdateInfo> list = new List<UpdateInfo>();
+        if (!Configured) return list;
+
+        ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+        HttpWebRequest rq = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + Repo + "/releases?per_page=10");
+        rq.UserAgent = "SpotifyOverlay";
+        rq.Timeout = 8000;
+        string json;
+        using (WebResponse rs = rq.GetResponse())
+        using (StreamReader sr = new StreamReader(rs.GetResponseStream()))
+            json = sr.ReadToEnd();
+
+        List<object> rels = Json.Parse(json) as List<object>;
+        if (rels == null) return list;
+        foreach (object rel in rels)
+        {
+            try
+            {
+                string tag = Json.Str(rel, "tag_name").TrimStart('v', 'V');
+                string url = null;
+                List<object> assets = Json.Get(rel, "assets") as List<object>;
+                if (assets != null)
+                    foreach (object a in assets)
+                        if (Json.Str(a, "name").EndsWith("Setup.exe", StringComparison.OrdinalIgnoreCase))
+                            url = Json.Str(a, "browser_download_url");
+                if (url == null || tag.Length == 0) continue;
+                UpdateInfo item = new UpdateInfo();
+                item.Ver = new Version(tag);
+                item.Url = url;
+                item.Notes = Json.Str(rel, "body");
+                list.Add(item);
+            }
+            catch { }
+        }
+        return list;
+    }
+
     public static string TempFile()
     {
         return Path.Combine(Path.GetTempPath(), "SpotifyOverlay_Update.exe");

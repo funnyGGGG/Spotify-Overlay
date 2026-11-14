@@ -18,6 +18,7 @@ class UpdateForm : Form
     Bar bar;
     FlatBtn bNow, bLater;
     bool busy = false;
+    bool rollback = false;
 
     public UpdateForm(Overlay overlay, UpdateInfo update, bool startNow)
     {
@@ -60,7 +61,12 @@ class UpdateForm : Form
         tNotes.ForeColor = Color.White;
         tNotes.BorderStyle = BorderStyle.None;
         string notesText = string.IsNullOrEmpty(info.Notes) ? "" : Lang.T("upd_notes") + ":\r\n" + info.Notes.Replace("\n", "\r\n");
-        if (Contact.HasDonate) notesText += (notesText.Length > 0 ? "\r\n\r\n" : "") + Lang.T("donate_update") + "\r\n" + Contact.Donate;
+        if (Contact.HasDonate)
+        {
+            string dl = "";
+            foreach (System.Collections.Generic.KeyValuePair<string, string> dn in Contact.DonateLinks()) dl += "\r\n" + dn.Key + ": " + dn.Value;
+            notesText += (notesText.Length > 0 ? "\r\n\r\n" : "") + Lang.T("donate_update") + dl;
+        }
         tNotes.Text = notesText;
         Controls.Add(tNotes);
 
@@ -86,6 +92,15 @@ class UpdateForm : Form
         Controls.Add(bNow);
 
         if (startNow) Shown += delegate { Start(); };
+    }
+
+    // Fuer "Version wechseln": gleiche Abfolge wie beim Update, aber mit einer aelteren oder anderen Version
+    public void SetRollback()
+    {
+        rollback = true;
+        lTitle.Text = Lang.T("roll_title");
+        bNow.Text = Lang.T("roll_now");
+        lStatus.Text = Lang.T("roll_note");
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
@@ -122,6 +137,12 @@ class UpdateForm : Form
             }
             bar.Value = 100;
             lStatus.Text = Lang.T("upd_inst");
+            if (rollback)
+            {
+                // damit die gewaehlte Version bleibt, wird die automatische Update-Suche ausgeschaltet
+                Config.AutoUpdate = false;
+                Config.Save();
+            }
             try { Process.Start(file, "/update"); } catch { }
             busy = false;
             ov.ExitAll();

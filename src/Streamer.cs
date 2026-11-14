@@ -208,32 +208,46 @@ static class Streamer
     }
 
     // Die Webseite fuer die OBS-Browserquelle. Parameter: ?scale=1.5 (Groesse), &bar=0 (ohne Fortschrittsbalken)
-    const string Page = @"<!doctype html><html><head><meta charset='utf-8'><title>Spotify Overlay</title>
+    const string Page = @"<!doctype html><html><head><meta charset='utf-8'><title>Spotify Overlay by funny.games</title>
 <style>
 html,body{margin:0;background:transparent;font-family:'Segoe UI',Arial,sans-serif;color:#fff;overflow:hidden}
-#c{display:flex;align-items:center;padding:12px;background:rgba(24,24,24,.82);border-radius:14px;width:fit-content;max-width:96vw;transition:opacity .4s}
-#c.off{opacity:0}
-img{width:72px;height:72px;border-radius:10px;object-fit:cover;margin-right:14px}
-#t{font-size:20px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px}
-#a{font-size:15px;color:#b3b3b3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px}
-#bar{height:4px;background:#404040;border-radius:2px;margin-top:8px}
-#fill{height:4px;background:#1db954;border-radius:2px;width:0}
+#c{box-sizing:border-box;width:340px;padding:12px 14px 8px;background:#181818;border-radius:14px}
+#r{display:flex;align-items:center}
+#i{width:64px;height:64px;border-radius:10px;object-fit:cover;margin-right:12px;background:#2a2a2a;flex:none}
+#m{min-width:0;flex:1}
+#t{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#a{font-size:13px;color:#a5a5a5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+#s{display:flex;align-items:center;margin-top:6px;font-size:11px;color:#a5a5a5}
+#d{width:8px;height:8px;border-radius:50%;background:#1db954;margin-right:6px}
+#b{margin-top:10px}
+#bar{height:4px;background:#3e3e3e;border-radius:2px}
+#fill{height:4px;background:#e87828;border-radius:2px;width:0}
+#tm{display:flex;justify-content:space-between;font-size:11px;color:#a5a5a5;margin-top:4px}
+#f{text-align:center;font-size:10.5px;color:#7d7d7d;margin-top:8px;letter-spacing:.2px}
 </style></head><body>
-<div id='c' class='off'><img id='i'><div><div id='t'></div><div id='a'></div><div id='bar'><div id='fill'></div></div></div></div>
+<div id='c'>
+<div id='r'><img id='i'><div id='m'><div id='t'></div><div id='a'></div><div id='s'><span id='d'></span>Spotify</div></div></div>
+<div id='b'><div id='bar'><div id='fill'></div></div><div id='tm'><span id='p'>0:00</span><span id='e'>0:00</span></div></div>
+<div id='f'>Spotify Overlay by funny.games</div>
+</div>
 <script>
-var q=location.search,ver=-1;
+var q=location.search,ver=-1,pos=0,dur=0,play=false,ts=0;
+function $(x){return document.getElementById(x)}
 function g(k,d){var m=new RegExp('[?&]'+k+'=([^&]*)').exec(q);return m?decodeURIComponent(m[1]):d}
-var z=parseFloat(g('scale','1'));if(z>0&&z!=1)document.getElementById('c').style.zoom=z;
-if(g('bar','1')=='0')document.getElementById('bar').style.display='none';
+var z=parseFloat(g('scale','1'));if(z>0&&z!=1)$('c').style.zoom=z;
+if(g('bar','1')=='0')$('b').style.display='none';
+function fm(s){s=Math.max(0,Math.floor(s));var m=Math.floor(s/60),r=s%60;return m+':'+(r<10?'0':'')+r}
+function draw(){var p=pos+(play?(Date.now()-ts)/1000:0);if(dur>0&&p>dur)p=dur;
+$('fill').style.width=(dur>0?p/dur*100:0)+'%';$('p').textContent=fm(p);$('e').textContent=fm(dur)}
 function tick(){var x=new XMLHttpRequest();x.open('GET','/state?'+Date.now());x.onload=function(){try{
-var s=JSON.parse(x.responseText),c=document.getElementById('c');
-if(!s.active){c.className='off';return}
-document.getElementById('t').textContent=s.title;
-document.getElementById('a').textContent=s.artist;
-if(s.cover!=ver){ver=s.cover;document.getElementById('i').src='/cover.png?'+ver}
-document.getElementById('fill').style.width=(s.dur>0?Math.min(100,s.pos/s.dur*100):0)+'%';
-c.className='';
+var s=JSON.parse(x.responseText);pos=s.pos;dur=s.dur;play=s.playing;ts=Date.now();
+if(!s.active){$('t').textContent='Spotify Overlay';$('a').textContent='Waiting for Spotify ...';
+$('i').style.visibility='hidden';$('b').style.visibility='hidden';return}
+$('i').style.visibility='visible';$('b').style.visibility='visible';
+$('t').textContent=s.title;$('a').textContent=s.artist;
+if(s.cover!=ver){ver=s.cover;$('i').src='/cover.png?'+ver}
+draw();
 }catch(e){}};x.send()}
-setInterval(tick,1000);tick();
+setInterval(tick,1000);setInterval(draw,250);tick();
 </script></body></html>";
 }
