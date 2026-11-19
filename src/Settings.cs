@@ -23,6 +23,12 @@ class SettingsForm : Form
 
     Overlay ov;
     bool loading = true, dirty = false;
+    int curTab = 0;
+    TextBox tSearch;
+    ListBox lbSearch;
+    Label lSearch;
+    List<int> searchTabs = new List<int>();
+    FlatBtn bReset;
     const int TABS = 8;
     NavItem[] nav = new NavItem[TABS];
     Panel[] pages = new Panel[TABS];
@@ -33,7 +39,7 @@ class SettingsForm : Form
     // Stand beim Oeffnen (zum Zuruecksetzen)
     string snapLang, snapSpId;
     int snapOpacity, snapScale;
-    bool snapPopup, snapVolume, snapDiscord, snapCover, snapUpdate, snapFollow, snapStrFile, snapStrWeb, snapDodge, snapWaves, snapBgOff, snapToast, snapCap, snapPP;
+    bool snapPopup, snapVolume, snapDiscord, snapCover, snapUpdate, snapFollow, snapStrFile, snapStrWeb, snapDodge, snapWaves, snapBgOff, snapToast, snapCap, snapPP, snapShuf;
     int snapBgA;
     string snapStrFmt, snapProfiles;
     int snapVolStep;
@@ -64,7 +70,8 @@ class SettingsForm : Form
     FlatBtn bStrFolder, bStrCopy;
     // Design
     Label hDes, lDesInfo, gDesToast, lToastHint, gDesTrans, lBgA, lBgAVal, lPPHint;
-    Toggle tToast, tPP;
+    Toggle tToast, tPP, tShuf;
+    Label gDesBtn, lShufHint;
     Slider slBgA;
     // Spiele-Profile
     Label hProf, lProfInfo, lProfApp, gProfEdit, lProfSize, lProfSizeVal, lProfOp, lProfOpVal, lProfPos;
@@ -217,6 +224,36 @@ class SettingsForm : Form
             nav[i] = n;
         }
 
+        lSearch = new Label();
+        lSearch.ForeColor = Color.FromArgb(120, 120, 120);
+        lSearch.BackColor = SIDE;
+        lSearch.Font = new Font("Segoe UI", 8.5f);
+        lSearch.Location = new Point(16, 426);
+        lSearch.Size = new Size(160, 16);
+        side.Controls.Add(lSearch);
+
+        tSearch = new TextBox();
+        tSearch.Location = new Point(14, 444);
+        tSearch.Size = new Size(162, 24);
+        tSearch.BackColor = FIELD;
+        tSearch.ForeColor = Color.White;
+        tSearch.BorderStyle = BorderStyle.FixedSingle;
+        tSearch.Font = new Font("Segoe UI", 9.5f);
+        tSearch.TextChanged += delegate { SearchNow(); };
+        side.Controls.Add(tSearch);
+
+        lbSearch = new ListBox();
+        lbSearch.Location = new Point(14, 472);
+        lbSearch.Size = new Size(162, 96);
+        lbSearch.BackColor = FIELD;
+        lbSearch.ForeColor = Color.White;
+        lbSearch.BorderStyle = BorderStyle.None;
+        lbSearch.Font = new Font("Segoe UI", 8.5f);
+        lbSearch.IntegralHeight = false;
+        lbSearch.Visible = false;
+        lbSearch.Click += delegate { SearchPick(); };
+        side.Controls.Add(lbSearch);
+
         lSideVer = new Label();
         lSideVer.ForeColor = Color.FromArgb(120, 120, 120);
         lSideVer.BackColor = SIDE;
@@ -235,7 +272,13 @@ class SettingsForm : Form
         bar.BackColor = Color.FromArgb(20, 20, 20);
         Controls.Add(bar);
 
-        lSaved = Lbl(bar, 36, 20, 240, 24, 10f, GREEN, FontStyle.Bold, Color.FromArgb(20, 20, 20));
+        lSaved = Lbl(bar, 36, 20, 170, 24, 10f, GREEN, FontStyle.Bold, Color.FromArgb(20, 20, 20));
+
+        bReset = new FlatBtn("", FIELD, Color.White);
+        bReset.Location = new Point(216, 12);
+        bReset.Size = new Size(140, 40);
+        bReset.Click += delegate { ResetSection(); };
+        bar.Controls.Add(bReset);
 
         bClose = new FlatBtn("", FIELD, Color.White);
         bClose.Location = new Point(366, 12);
@@ -250,8 +293,102 @@ class SettingsForm : Form
         bar.Controls.Add(bSave);
     }
 
+    // Funktionen suchen: findet Beschriftungen in allen Tabs und springt dorthin
+    void SearchNow()
+    {
+        string q = tSearch.Text.Trim().ToLower();
+        lbSearch.Items.Clear();
+        searchTabs.Clear();
+        if (q.Length < 2) { lbSearch.Visible = false; return; }
+        for (int k = 0; k < TABS; k++)
+        {
+            List<string> found = new List<string>();
+            SearchCollect(pages[k], q, found);
+            foreach (string f in found)
+            {
+                if (searchTabs.Count >= 12) break;
+                lbSearch.Items.Add(nav[k].Text + ": " + (f.Length > 30 ? f.Substring(0, 30) + "..." : f));
+                searchTabs.Add(k);
+            }
+        }
+        lbSearch.Visible = lbSearch.Items.Count > 0;
+    }
+
+    static void SearchCollect(Control c, string q, List<string> found)
+    {
+        foreach (Control ch in c.Controls)
+        {
+            if ((ch is Label || ch is Toggle || ch is FlatBtn) && ch.Text.Length > 2 && ch.Text.ToLower().Contains(q) && !found.Contains(ch.Text))
+                found.Add(ch.Text);
+            SearchCollect(ch, q, found);
+        }
+    }
+
+    void SearchPick()
+    {
+        int i = lbSearch.SelectedIndex;
+        if (i < 0 || i >= searchTabs.Count) return;
+        ShowTab(searchTabs[i]);
+    }
+
+    // Nur den aktuellen Tab auf die Standardwerte zuruecksetzen
+    void ResetSection()
+    {
+        if (curTab == 7) return;   // Hilfe: nichts zurueckzusetzen
+        if (MessageBox.Show(this, Lang.T("reset_confirm"), Lang.T("reset_btn"), MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        switch (curTab)
+        {
+            case 0:
+                ov.PreviewScale(100);
+                Config.Opacity = 70;
+                Config.Popup = false;
+                Config.Volume = true;
+                Config.Follow = false;
+                Config.Dodge = false;
+                Config.Waves = false;
+                Config.BgOff = false;
+                break;
+            case 1:
+                for (int i = 0; i < HK; i++) Config.Hk[i] = "";
+                Config.VolStep = 5;
+                break;
+            case 2:
+                Config.Discord = true;
+                Config.DiscordCover = true;
+                Config.Capturable = false;
+                break;
+            case 3:
+                Config.StreamFile = false;
+                Config.StreamWeb = false;
+                Config.StreamFormat = "{artist} - {title}";
+                break;
+            case 4:
+                GameProfiles.Items.Clear();
+                GameProfiles.Store();
+                ProfRefreshList();
+                ProfShow();
+                break;
+            case 5:
+                Config.Toast = false;
+                Config.PerPixel = false;
+                Config.BgAlpha = 100;
+                Config.ShufRep = false;
+                break;
+            case 6:
+                Config.AutoUpdate = true;
+                break;
+        }
+        bool wasLoading = loading;
+        loading = true;
+        LoadValues();
+        loading = wasLoading;
+        Apply();
+        lSaved.Text = Lang.T("reset_done");
+    }
+
     void ShowTab(int i)
     {
+        curTab = i;
         for (int k = 0; k < TABS; k++)
         {
             pages[k].Visible = (k == i);
@@ -432,6 +569,10 @@ class SettingsForm : Form
         p.Controls.Add(slBgA);
         lBgAVal = Lbl(p, 548, 298, 50, 24, 10f, DIM, FontStyle.Regular);
         lPPHint = Lbl(p, 36, 330, 560, 62, 9f, DIM, FontStyle.Regular);
+
+        gDesBtn = Group(p, 404);
+        tShuf = Tog(p, 436);
+        lShufHint = Lbl(p, 36, 466, 560, 64, 9f, DIM, FontStyle.Regular);
     }
 
     void BuildProfiles(Panel p)
@@ -824,6 +965,7 @@ class SettingsForm : Form
         tWaves.Checked = Config.Waves;
         tBgOff.Checked = Config.BgOff;
         tPP.Checked = Config.PerPixel;
+        tShuf.Checked = Config.ShufRep;
         slBgA.Value = Math.Max(0, Math.Min(100, Config.BgAlpha));
         lBgAVal.Text = slBgA.Value + " %";
         tToast.Checked = Config.Toast;
@@ -855,6 +997,7 @@ class SettingsForm : Form
         snapWaves = Config.Waves;
         snapBgOff = Config.BgOff;
         snapPP = Config.PerPixel;
+        snapShuf = Config.ShufRep;
         snapBgA = Config.BgAlpha;
         snapToast = Config.Toast;
         snapCap = Config.Capturable;
@@ -882,6 +1025,7 @@ class SettingsForm : Form
         Config.Waves = snapWaves;
         Config.BgOff = snapBgOff;
         Config.PerPixel = snapPP;
+        Config.ShufRep = snapShuf;
         Config.BgAlpha = snapBgA;
         Config.Toast = snapToast;
         Config.Capturable = snapCap;
@@ -945,6 +1089,7 @@ class SettingsForm : Form
         tWaves.CheckedChanged += delegate { if (!loading) Apply(); };
         tBgOff.CheckedChanged += delegate { if (!loading) Apply(); };
         tPP.CheckedChanged += delegate { if (!loading) Apply(); };
+        tShuf.CheckedChanged += delegate { if (!loading) Apply(); };
         slBgA.ValueChanged += delegate { lBgAVal.Text = slBgA.Value + " %"; if (!loading) Apply(); };
         tToast.CheckedChanged += delegate { if (!loading) Apply(); };
         tCap.CheckedChanged += delegate { if (!loading) Apply(); };
@@ -1033,6 +1178,11 @@ class SettingsForm : Form
         tPP.Text = Lang.T("des_pp");
         lBgA.Text = Lang.T("des_bga");
         lPPHint.Text = Lang.T("des_pp_hint");
+        gDesBtn.Text = Lang.T("des_grp_btn").ToUpper();
+        tShuf.Text = Lang.T("set_shuf");
+        lShufHint.Text = Lang.T("shuf_hint");
+        lSearch.Text = Lang.T("srch_label");
+        bReset.Text = Lang.T("reset_btn");
 
         hUpd.Text = Lang.T("tab_updates");
         gRoll.Text = Lang.T("roll_grp").ToUpper();
@@ -1116,6 +1266,7 @@ class SettingsForm : Form
         Config.Waves = tWaves.Checked;
         Config.BgOff = tBgOff.Checked;
         Config.PerPixel = tPP.Checked;
+        Config.ShufRep = tShuf.Checked;
         Config.BgAlpha = slBgA.Value;
         Config.Toast = tToast.Checked;
         Config.Capturable = tCap.Checked;

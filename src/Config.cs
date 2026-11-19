@@ -4,7 +4,7 @@ using Microsoft.Win32;
 
 static class App
 {
-    public const string Version = "1.20";
+    public const string Version = "2.1";
 }
 
 // Einstellungen, liegen in der Registry unter HKCU\Software\SpotifyOverlay
@@ -33,6 +33,7 @@ static class Config
     public static int BgAlpha = 100;            // Deckkraft des Hintergrunds in Prozent (nur mit erweiterter Transparenz)
     public static bool Capturable = false;      // Overlay als Fenster teilbar (Discord, OBS), nach Neustart
     public static bool Waves = false;           // Mini-Wellen
+    public static bool ShufRep = false;         // Knoepfe fuer Zufall und Wiederholen im Overlay
     public static int VolStep = 5;              // Lautstaerke-Schritt der Tastenkuerzel in Prozent
     public static string Profiles = "";         // Spiele-Profile (siehe GameProfiles.cs)
 
@@ -87,6 +88,7 @@ static class Config
                     if (BgAlpha < 0 || BgAlpha > 100) BgAlpha = 100;
                     Capturable = GetInt(k, "Capturable", 0) == 1;
                     Waves = GetInt(k, "Waves", 0) == 1;
+                    ShufRep = GetInt(k, "ShufRep", 0) == 1;
                     VolStep = GetInt(k, "VolStep", 5);
                     if (VolStep < 1 || VolStep > 25) VolStep = 5;
                     Profiles = (k.GetValue("Profiles") as string) ?? "";
@@ -139,6 +141,7 @@ static class Config
                 k.SetValue("BgAlpha", BgAlpha);
                 k.SetValue("Capturable", Capturable ? 1 : 0);
                 k.SetValue("Waves", Waves ? 1 : 0);
+                k.SetValue("ShufRep", ShufRep ? 1 : 0);
                 k.SetValue("VolStep", VolStep);
                 k.SetValue("Profiles", Profiles ?? "");
                 if (LyX != int.MinValue) k.SetValue("LyX", LyX);

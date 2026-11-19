@@ -113,6 +113,23 @@ static class SpotifyAudio
         return list;
     }
 
+    // Spotify hat manchmal mehrere Sitzungen. Die Anzeige muss die nehmen, die gerade Ton ausgibt,
+    // sonst stimmt die Lautstaerke nicht mit der in Spotify ueberein.
+    static ISimpleAudioVolume Pick(List<ISimpleAudioVolume> l)
+    {
+        foreach (ISimpleAudioVolume s in l)
+        {
+            try
+            {
+                int st;
+                ((IAudioSessionControl2)s).GetState(out st);
+                if (st == 1) return s;
+            }
+            catch { }
+        }
+        return l[0];
+    }
+
     // 0..1, oder -1 wenn Spotify gerade keine Audio-Sitzung hat
     public static float Get()
     {
@@ -123,7 +140,7 @@ static class SpotifyAudio
                 List<ISimpleAudioVolume> l = Sessions();
                 if (l.Count == 0) return -1f;
                 float v;
-                l[0].GetMasterVolume(out v);
+                Pick(l).GetMasterVolume(out v);
                 return v;
             }
         }
@@ -140,7 +157,7 @@ static class SpotifyAudio
                 List<ISimpleAudioVolume> l = Sessions();
                 if (l.Count == 0) return 0f;
                 float p;
-                ((IAudioMeterInformation)l[0]).GetPeakValue(out p);
+                ((IAudioMeterInformation)Pick(l)).GetPeakValue(out p);
                 if (p < 0f) p = 0f;
                 if (p > 1f) p = 1f;
                 return p;

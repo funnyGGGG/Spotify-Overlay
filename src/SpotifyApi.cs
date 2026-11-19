@@ -284,6 +284,21 @@ static class SpotifyApi
     }
 
     // 0 = wird abgespielt, 1 = kein Premium (Playlist in Spotify geoeffnet), 2 = nur in Spotify geoeffnet
+    // Zufall und Wiederholen ueber die Spotify-Schnittstelle (braucht Premium)
+    public static int SetShuffle(bool on)
+    {
+        int st;
+        Call("PUT", "https://api.spotify.com/v1/me/player/shuffle?state=" + (on ? "true" : "false"), null, out st);
+        return st;
+    }
+
+    public static int SetRepeat(int mode)
+    {
+        int st;
+        Call("PUT", "https://api.spotify.com/v1/me/player/repeat?state=" + (mode == 2 ? "track" : (mode == 1 ? "context" : "off")), null, out st);
+        return st;
+    }
+
     public static int Play(string playlistId)
     {
         string body = "{\"context_uri\":\"spotify:playlist:" + playlistId + "\"}";

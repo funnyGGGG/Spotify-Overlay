@@ -85,9 +85,19 @@ class DiscordRpc
         }
         string img = (lvl <= 1 && !string.IsNullOrEmpty(cover)) ? cover : "logo";
         a.Append(",\"assets\":{\"large_image\":\"").Append(Esc(img)).Append("\",\"large_text\":\"").Append(Esc(Cut(title))).Append("\"}");
-        string gh = Contact.GitHub;
-        if (lvl <= 1 && gh.Length > 0)
-            a.Append(",\"buttons\":[{\"label\":\"Get Spotify Overlay\",\"url\":\"").Append(Esc(gh)).Append("\"}]");
+        string gh = Contact.GitHub, dc = Contact.Discord;
+        if (lvl <= 1)
+        {
+            // zwei Knoepfe unter der Aktivitaet: Discord-Server und GitHub
+            StringBuilder btn = new StringBuilder();
+            if (Contact.HasDiscord && dc.StartsWith("http")) btn.Append("{\"label\":\"Discord\",\"url\":\"").Append(Esc(dc)).Append("\"}");
+            if (gh.StartsWith("http"))
+            {
+                if (btn.Length > 0) btn.Append(",");
+                btn.Append("{\"label\":\"GitHub\",\"url\":\"").Append(Esc(gh)).Append("\"}");
+            }
+            if (btn.Length > 0) a.Append(",\"buttons\":[").Append(btn.ToString()).Append("]");
+        }
         a.Append("}");
         return a.ToString();
     }

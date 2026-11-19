@@ -81,6 +81,53 @@ static class Media
         return true;
     }
 
+    // Zufall und Wiederholen aus der Mediensitzung. shuffle: -1 unbekannt, 0 aus, 1 an.
+    // repeat: -1 unbekannt, 0 aus, 1 Playlist, 2 Titel
+    public static bool GetModes(out int shuffle, out int repeat)
+    {
+        shuffle = -1; repeat = -1;
+        dynamic s = Session();
+        if (s == null) return false;
+        dynamic info = s.GetPlaybackInfo();
+        object sh = info.IsShuffleActive;
+        if (sh != null) shuffle = Convert.ToBoolean(sh) ? 1 : 0;
+        object rp = info.AutoRepeatMode;
+        if (rp != null)
+        {
+            int v = Convert.ToInt32(rp);   // 0 aus, 1 Titel, 2 Liste
+            repeat = v == 1 ? 2 : (v == 2 ? 1 : 0);
+        }
+        return true;
+    }
+
+    // 0 = ok, 1 = keine Sitzung, 2 = Fehler, 3 = von Spotify nicht unterstuetzt
+    public static int SetShuffle(bool on)
+    {
+        try
+        {
+            dynamic s = Session();
+            if (s == null) return 1;
+            object op = s.TryChangeShuffleActiveAsync(on);
+            return (bool)Await(op, typeof(bool)) ? 0 : 3;
+        }
+        catch { return 2; }
+    }
+
+    public static int SetRepeat(int mode)
+    {
+        try
+        {
+            dynamic s = Session();
+            if (s == null) return 1;
+            Type et = Type.GetType("Windows.Media.MediaPlaybackAutoRepeatMode, Windows.Media, ContentType=WindowsRuntime");
+            if (et == null) return 2;
+            object val = Enum.ToObject(et, mode == 2 ? 1 : (mode == 1 ? 2 : 0));
+            object op = s.TryChangeAutoRepeatModeAsync((dynamic)val);
+            return (bool)Await(op, typeof(bool)) ? 0 : 3;
+        }
+        catch { return 2; }
+    }
+
     public static bool Seek(double sec)
     {
         try

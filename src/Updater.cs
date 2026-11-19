@@ -53,13 +53,22 @@ static class Updater
         if (!Configured) return false;
 
         ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;   // TLS 1.2
-        HttpWebRequest rq = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + Repo + "/releases/latest");
-        rq.UserAgent = "SpotifyOverlay";
-        rq.Timeout = 8000;
         string json;
-        using (WebResponse rs = rq.GetResponse())
-        using (StreamReader sr = new StreamReader(rs.GetResponseStream()))
-            json = sr.ReadToEnd();
+        try
+        {
+            HttpWebRequest rq = (HttpWebRequest)WebRequest.Create("https://api.github.com/repos/" + Repo + "/releases/latest");
+            rq.UserAgent = "SpotifyOverlay";
+            rq.Timeout = 8000;
+            using (WebResponse rs = rq.GetResponse())
+            using (StreamReader sr = new StreamReader(rs.GetResponseStream()))
+                json = sr.ReadToEnd();
+        }
+        catch (WebException ex)
+        {
+            HttpWebResponse hr = ex.Response as HttpWebResponse;
+            if (hr != null && hr.StatusCode == HttpStatusCode.NotFound) return true;   // noch kein Release: nichts zu aktualisieren
+            throw;
+        }
 
         object rel = Json.Parse(json);
         string tag = Json.Str(rel, "tag_name").TrimStart('v', 'V');
@@ -69,13 +78,32 @@ static class Updater
             foreach (object a in assets)
                 if (Json.Str(a, "name").EndsWith("Setup.exe", StringComparison.OrdinalIgnoreCase))
                     url = Json.Str(a, "browser_download_url");
-        if (url == null || tag.Length == 0) return false;
+        Version ver;
+        if (url == null || !Version.TryParse(tag, out ver))
+        {
+            // Das neueste Release hat keine Setup.exe (zum Beispiel weil der Build fehlgeschlagen ist):
+            // dann zaehlt das neueste Release, das eine hat. Gibt es keins, ist nichts zu aktualisieren.
+            info = Newest();
+            return true;
+        }
 
         info = new UpdateInfo();
-        info.Ver = new Version(tag);
+        info.Ver = ver;
         info.Url = url;
         info.Notes = Json.Str(rel, "body");
         return true;
+    }
+
+    static UpdateInfo Newest()
+    {
+        UpdateInfo best = null;
+        try
+        {
+            foreach (UpdateInfo u in Recent())
+                if (best == null || u.Ver > best.Ver) best = u;
+        }
+        catch { }
+        return best;
     }
 
     // Die letzten Versionen (fuer "Version wechseln")

@@ -33,7 +33,7 @@ class TaskbarHost : Form
     public TaskbarHost(Overlay o, Icon ic)
     {
         ov = o;
-        Text = "Spotify Overlay";
+        Text = Config.Capturable ? "Spotify Overlay (Taskleiste / Taskbar)" : "Spotify Overlay";
         if (ic != null) Icon = ic;
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = true;
@@ -156,6 +156,13 @@ class Overlay : Form
     bool pp = Config.PerPixel;          // erweiterte Transparenz (Alpha pro Pixel), gilt ab dem Start
     double ppOpacity = 1.0;
     bool ppQueued = false;
+    bool shuffleOn = false;             // Zufall an
+    int repeatMode = 0;                 // 0 aus, 1 Playlist, 2 Titel
+    DateTime modeHold = DateTime.MinValue;
+    int wShuf = -1, wRep = -1;
+    DateTime marqStart = DateTime.Now;  // Start der Laufschrift (neu bei jedem Song)
+    bool marqNeed = false;
+    System.Windows.Forms.Timer marqTimer;
     SongToast toast = null;
     bool toastPending = false;
     DateTime toastAt = DateTime.MinValue;
@@ -220,7 +227,7 @@ class Overlay : Form
     float pendingVol = 0f;
     AutoResetEvent volEvent = new AutoResetEvent(false);
 
-    float BaseH { get { return Config.Volume ? 86f : 68f; } }
+    float BaseH { get { return (Config.Volume || Config.ShufRep) ? 86f : 68f; } }
 
     protected override CreateParams CreateParams
     {
@@ -417,6 +424,12 @@ class Overlay : Form
                 float v = -1f;
                 bool readVol = Config.Volume && !volDrag && DateTime.Now >= nextVol;
                 if (readVol) { v = SpotifyAudio.Get(); nextVol = DateTime.Now.AddMilliseconds(600); }
+                int modeShuf = -1, modeRep = -1;
+                if (Config.ShufRep)
+                {
+                    try { Media.GetModes(out modeShuf, out modeRep); }
+                    catch { }
+                }
                 string fgExe = "", fgTitle = "";
                 if (GameProfiles.Any)
                 {
@@ -439,6 +452,8 @@ class Overlay : Form
                 {
                     wFgExe = fgExe;
                     wFgTitle = fgTitle;
+                    wShuf = modeShuf;
+                    wRep = modeRep;
                     wRunning = r;
                     wSmtc = sok;
                     wTitle = st;
@@ -694,6 +709,14 @@ class Overlay : Form
         Thread vst = new Thread(VolSyncLoop);
         vst.IsBackground = true;
         vst.Start();
+        marqTimer = new System.Windows.Forms.Timer();
+        marqTimer.Interval = 60;
+        marqTimer.Tick += delegate
+        {
+            if (marqNeed && Visible)
+                Invalidate(new Rectangle((int)(56 * scale), (int)(6 * scale), (int)(168 * scale) + 2, (int)(36 * scale)));
+        };
+        marqTimer.Start();
 
         ApplyScale(scale);
         if (Config.Popup) hideTimer.Start();
@@ -853,7 +876,7 @@ class Overlay : Form
                 if (!Updater.Configured) { say(Lang.T("upd_norepo")); return; }
                 UpdateInfo info;
                 if (!Updater.Latest(out info)) { say(Lang.T("upd_fail")); return; }
-                if (info.Ver > Updater.Current)
+                if (info != null && info.Ver > Updater.Current)
                 {
                     say(Lang.T("upd_avail", info.Ver));
                     BeginInvoke(new Action(delegate
@@ -877,6 +900,8 @@ class Overlay : Form
         if (i == 3) return new RectangleF(302 * scale, 7 * scale, 22 * scale, 22 * scale);   // Songtext
         if (i == 4) return new RectangleF(326 * scale, 7 * scale, 22 * scale, 22 * scale);   // Playlists
         if (i == 5) return new RectangleF(350 * scale, 7 * scale, 22 * scale, 22 * scale);   // Einstellungen
+        if (i == 6) return new RectangleF(318 * scale, 63 * scale, 20 * scale, 20 * scale);   // Zufall
+        if (i == 7) return new RectangleF(340 * scale, 63 * scale, 20 * scale, 20 * scale);   // Wiederholen
         return new RectangleF(BtnX[i] * scale, 5 * scale, 24 * scale, 24 * scale);
     }
 
@@ -988,6 +1013,108 @@ class Overlay : Form
         return (t / 60) + ":" + (t % 60).ToString("00");
     }
 
+    // Passt ein Text nicht in die Zeile, laeuft er langsam durch (mit kurzer Pause am Anfang)
+    void DrawMarquee(Graphics g, string text, Font f, Brush b, RectangleF r, StringFormat fmt)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        float tw = g.MeasureString(text, f, 10000, fmt).Width;
+        if (tw <= r.Width) { g.DrawString(text, f, b, r, fmt); return; }
+        marqNeed = true;
+        float total = tw + 28f * scale;
+        double t = (DateTime.Now - marqStart).TotalSeconds;
+        float off = t < 1.5 ? 0f : (float)(((t - 1.5) * 38.0 * scale) % total);
+        GraphicsState st = g.Save();
+        g.SetClip(r);
+        g.DrawString(text, f, b, r.X - off, r.Y, fmt);
+        if (off > 0f) g.DrawString(text, f, b, r.X - off + total, r.Y, fmt);
+        g.Restore(st);
+    }
+
+    // ---------- Zufall und Wiederholen ----------
+    void DrawShuffle(Graphics g, RectangleF r, bool hover, bool on)
+    {
+        Color c = on ? ACC : (hover ? Color.White : Color.FromArgb(150, 150, 150));
+        float x = r.X, y = r.Y, w = r.Width, h = r.Height;
+        using (Pen p = new Pen(c, Math.Max(1.4f, w * 0.09f)))
+        {
+            p.StartCap = LineCap.Round;
+            p.EndCap = LineCap.Round;
+            g.DrawLine(p, x + w * 0.15f, y + h * 0.30f, x + w * 0.85f, y + h * 0.70f);
+            g.DrawLine(p, x + w * 0.15f, y + h * 0.70f, x + w * 0.85f, y + h * 0.30f);
+            g.DrawLine(p, x + w * 0.85f, y + h * 0.70f, x + w * 0.62f, y + h * 0.70f);
+            g.DrawLine(p, x + w * 0.85f, y + h * 0.70f, x + w * 0.85f, y + h * 0.47f);
+            g.DrawLine(p, x + w * 0.85f, y + h * 0.30f, x + w * 0.62f, y + h * 0.30f);
+            g.DrawLine(p, x + w * 0.85f, y + h * 0.30f, x + w * 0.85f, y + h * 0.53f);
+        }
+    }
+
+    void DrawRepeat(Graphics g, RectangleF r, bool hover, int mode)
+    {
+        Color c = mode > 0 ? ACC : (hover ? Color.White : Color.FromArgb(150, 150, 150));
+        float x = r.X, y = r.Y, w = r.Width, h = r.Height;
+        using (Pen p = new Pen(c, Math.Max(1.4f, w * 0.09f)))
+        {
+            p.StartCap = LineCap.Round;
+            p.EndCap = LineCap.Round;
+            g.DrawRectangle(p, x + w * 0.14f, y + h * 0.28f, w * 0.72f, h * 0.44f);
+            g.DrawLine(p, x + w * 0.62f, y + h * 0.14f, x + w * 0.80f, y + h * 0.28f);
+            g.DrawLine(p, x + w * 0.62f, y + h * 0.42f, x + w * 0.80f, y + h * 0.28f);
+        }
+        if (mode == 2 && fTiny != null)
+            using (SolidBrush b = new SolidBrush(c))
+            using (StringFormat mid = new StringFormat())
+            {
+                mid.Alignment = StringAlignment.Center;
+                mid.LineAlignment = StringAlignment.Center;
+                g.DrawString("1", fTiny, b, new RectangleF(x, y, w, h), mid);
+            }
+    }
+
+    void ToggleShuffle()
+    {
+        bool want = !shuffleOn;
+        shuffleOn = want;
+        modeHold = DateTime.Now.AddSeconds(4);
+        Invalidate();
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            bool ok = Media.SetShuffle(want) == 0;
+            if (!ok && SpotifyApi.LoggedIn)
+            {
+                try { int st = SpotifyApi.SetShuffle(want); ok = st >= 200 && st < 300; }
+                catch { }
+            }
+            if (!ok)
+            {
+                try { BeginInvoke(new Action(delegate { shuffleOn = !want; Invalidate(); })); } catch { }
+                Balloon(Lang.T("mode_fail"));
+            }
+        });
+    }
+
+    void CycleRepeat()
+    {
+        int want = (repeatMode + 1) % 3;
+        int before = repeatMode;
+        repeatMode = want;
+        modeHold = DateTime.Now.AddSeconds(4);
+        Invalidate();
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            bool ok = Media.SetRepeat(want) == 0;
+            if (!ok && SpotifyApi.LoggedIn)
+            {
+                try { int st = SpotifyApi.SetRepeat(want); ok = st >= 200 && st < 300; }
+                catch { }
+            }
+            if (!ok)
+            {
+                try { BeginInvoke(new Action(delegate { repeatMode = before; Invalidate(); })); } catch { }
+                Balloon(Lang.T("mode_fail"));
+            }
+        });
+    }
+
     void Render(Graphics g)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1013,8 +1140,9 @@ class Overlay : Form
             left.Trimming = StringTrimming.EllipsisCharacter;
             right.Alignment = StringAlignment.Far;
 
-            g.DrawString(title, fTitle, white, new RectangleF(56 * s, 6 * s, 168 * s, 20 * s), left);
-            g.DrawString(artist, fSub, grey, new RectangleF(56 * s, 24 * s, 168 * s, 16 * s), left);
+            marqNeed = false;
+            DrawMarquee(g, title, fTitle, white, new RectangleF(56 * s, 6 * s, 168 * s, 20 * s), left);
+            DrawMarquee(g, artist, fSub, grey, new RectangleF(56 * s, 24 * s, 168 * s, 16 * s), left);
             g.DrawString("Spotify", fTiny, grey, new RectangleF(21 * s, 49 * s, 40 * s, 14 * s), left);
 
             if (durSec > 0)
@@ -1063,6 +1191,11 @@ class Overlay : Form
         DrawLyrics(g, BtnRect(3), hoverBtn == 3, lyrics != null && !lyrics.IsDisposed);
         DrawList(g, BtnRect(4), hoverBtn == 4);
         DrawGear(g, BtnRect(5), hoverBtn == 5);
+        if (Config.ShufRep)
+        {
+            DrawShuffle(g, BtnRect(6), hoverBtn == 6, shuffleOn);
+            DrawRepeat(g, BtnRect(7), hoverBtn == 7, repeatMode);
+        }
 
         // Durchklickbar-Modus: oranger Rahmen
         if (clickThrough)
@@ -1203,7 +1336,8 @@ class Overlay : Form
     // ---------- Maus ----------
     int HitBtn(Point p)
     {
-        for (int i = 0; i < 6; i++) if (BtnRect(i).Contains(p)) return i;
+        int btnCount = Config.ShufRep ? 8 : 6;
+        for (int i = 0; i < btnCount; i++) if (BtnRect(i).Contains(p)) return i;
         return -1;
     }
 
@@ -1289,7 +1423,9 @@ class Overlay : Form
             else if (pressedBtn == 2) Cmd("next", CMD_NEXT);
             else if (pressedBtn == 3) ToggleLyrics();
             else if (pressedBtn == 4) OpenPlaylists();
-            else OpenSettings();
+            else if (pressedBtn == 5) OpenSettings();
+            else if (pressedBtn == 6) ToggleShuffle();
+            else if (pressedBtn == 7) CycleRepeat();
         }
         pressedBtn = -1;
 
@@ -1548,6 +1684,7 @@ class Overlay : Form
             adInfo = "";
             if (Config.Popup) ShowPopup();
             if (Config.Toast && !Config.Popup && !isAd) { toastPending = true; toastAt = DateTime.Now.AddMilliseconds(1200); }
+            marqStart = DateTime.Now;
             if (host != null) host.RefreshThumb();
             Thread t2 = new Thread(LoadCover);
             t2.IsBackground = true;
@@ -1559,6 +1696,15 @@ class Overlay : Form
 
         rpc.Update(Config.Discord, DiscordRpc.DefaultId, trackTitle, trackArtist, playing && !isAd, posSec, durSec, running && hasSong && !isAd, Config.DiscordCover);
         Streamer.Update(trackTitle, trackArtist, playing, running && hasSong && !isAd, posSec, durSec);
+        if (Config.ShufRep && DateTime.Now >= modeHold)
+        {
+            int modeS, modeR;
+            lock (stateLock) { modeS = wShuf; modeR = wRep; }
+            bool modeChanged = false;
+            if (modeS >= 0 && shuffleOn != (modeS == 1)) { shuffleOn = modeS == 1; modeChanged = true; }
+            if (modeR >= 0 && repeatMode != modeR) { repeatMode = modeR; modeChanged = true; }
+            if (modeChanged) Invalidate();
+        }
         ApplyProfiles();
         UpdateDodge();
         if (toastPending && DateTime.Now >= toastAt) { toastPending = false; ShowToast(); }
