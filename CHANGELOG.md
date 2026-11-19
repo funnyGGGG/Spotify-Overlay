@@ -1,6 +1,22 @@
 # Changelog / Änderungen
 
-## 1.20
+## 2.1
+- **EN:** Discord activity now shows two buttons: Discord (our server) and GitHub.
+- **DE:** Die Discord-Aktivität zeigt jetzt zwei Knöpfe: Discord (unser Server) und GitHub.
+- **EN:** The volume display now follows the Spotify session that is really playing, so it matches Spotify's volume.
+- **DE:** Die Lautstärke-Anzeige folgt jetzt der Spotify-Sitzung, die wirklich spielt, und passt so zur Lautstärke in Spotify.
+- **EN:** Long titles and artists scroll through the line instead of being cut off.
+- **DE:** Lange Titel und Interpreten laufen durch die Zeile, statt abgeschnitten zu werden.
+- **EN:** Search in the settings: find a function in the left bar and jump to it.
+- **DE:** Suche in den Einstellungen: Eine Funktion in der linken Leiste finden und direkt hinspringen.
+- **EN:** Reset tab: reset only the current tab to the defaults.
+- **DE:** Tab zurücksetzen: Nur den aktuellen Tab auf die Standardwerte zurücksetzen.
+- **EN:** Shuffle and repeat buttons on the overlay (off by default).
+- **DE:** Knöpfe für Zufall und Wiederholen im Overlay (standardmäßig aus).
+- **EN:** Screen sharing: the taskbar window got its own name so you pick the right window in Discord.
+- **DE:** Bildschirm teilen: Das Taskleisten-Fenster hat einen eigenen Namen, damit man in Discord das richtige Fenster wählt.
+
+## 2.00
 - **EN:** New option "Hide the background": the dark background becomes invisible and only text, cover and buttons stay visible. It works together with the opacity slider.
 - **DE:** Neue Option "Hintergrund ausblenden": Der dunkle Hintergrund wird unsichtbar, nur Text, Cover und Knöpfe bleiben sichtbar. Sie funktioniert zusammen mit dem Deckkraft-Regler.
 - **EN:** Discord: a "Reconnect" button, a more detailed status and a short checklist in the settings.
