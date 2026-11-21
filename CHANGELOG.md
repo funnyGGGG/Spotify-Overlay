@@ -1,6 +1,24 @@
 # Changelog / Änderungen
 
 ## 2.1
+- **EN:** More cover databases (iTunes, Deezer, MusicBrainz, TheAudioDB), so almost every song has a picture. The Spotify Overlay logo is only shown when no song is playing.
+- **DE:** Mehr Cover-Datenbanken (iTunes, Deezer, MusicBrainz, TheAudioDB), damit fast jeder Song ein Bild hat. Das Spotify-Overlay-Logo wird nur gezeigt, wenn kein Song läuft.
+- **EN:** After installing an update, a short tour shows what is new.
+- **DE:** Nach der Installation eines Updates zeigt eine kurze Tour, was neu ist.
+- **EN:** The search in the settings now shows the matching settings right in the settings window.
+- **DE:** Die Suche in den Einstellungen zeigt die passenden Einstellungen jetzt direkt im Einstellungsfenster.
+- **EN:** New stream window: a normal window with a live copy of the overlay that you can pick in Discord or OBS. The settings stay their own window.
+- **DE:** Neues Übertragungs-Fenster: ein normales Fenster mit einer Live-Kopie des Overlays, das du in Discord oder OBS wählen kannst. Die Einstellungen bleiben ein eigenes Fenster.
+- **EN:** The OBS web page now shows the real overlay 1:1 and always "Spotify Overlay by funny.games".
+- **DE:** Die OBS-Webseite zeigt jetzt das echte Overlay 1:1 und immer "Spotify Overlay by funny.games".
+- **EN:** Nicer donation window with one button per amount (Robux).
+- **DE:** Schöneres Spenden-Fenster mit einem Knopf pro Betrag (Robux).
+- **EN:** Covers are shown more reliably, in the overlay and in the Discord activity (second image source, retries).
+- **DE:** Cover werden zuverlässiger angezeigt, im Overlay und in der Discord-Aktivität (zweite Bildquelle, mehrere Versuche).
+- **EN:** Click-through stays on wherever you are, also across game profiles, until you close the app.
+- **DE:** Durchklickbar bleibt überall an, auch bei Spiel-Profilen, bis du die App schließt.
+- **EN:** With a Spotify login the volume now comes straight from Spotify, so it matches Spotify's slider. A volume test in the settings shows the values.
+- **DE:** Mit Spotify-Anmeldung kommt die Lautstärke jetzt direkt von Spotify und passt so zum Regler in Spotify. Ein Lautstärke-Test in den Einstellungen zeigt die Werte.
 - **EN:** Discord activity now shows two buttons: Discord (our server) and GitHub.
 - **DE:** Die Discord-Aktivität zeigt jetzt zwei Knöpfe: Discord (unser Server) und GitHub.
 - **EN:** The volume display now follows the Spotify session that is really playing, so it matches Spotify's volume.
