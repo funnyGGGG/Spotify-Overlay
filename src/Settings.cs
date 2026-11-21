@@ -25,9 +25,13 @@ class SettingsForm : Form
     bool loading = true, dirty = false;
     int curTab = 0;
     TextBox tSearch;
-    ListBox lbSearch;
     Label lSearch;
-    List<int> searchTabs = new List<int>();
+    Panel pageSearch;
+    bool searchBusy = false;
+    List<Control> movedC = new List<Control>();
+    List<Control> movedP = new List<Control>();
+    List<Point> movedL = new List<Point>();
+    List<Control> searchTemp = new List<Control>();
     FlatBtn bReset;
     const int TABS = 8;
     NavItem[] nav = new NavItem[TABS];
@@ -59,6 +63,8 @@ class SettingsForm : Form
     // Verbindungen
     Label hConn, gDiscord, lStatus, gSpotify, lSpId, lSpHint, lDcHelp, gCap, lCapHint;
     Toggle tCap;
+    FlatBtn bShare, bVolTest;
+    Label lVolTest;
     FlatBtn bDcRetry;
     Toggle tDiscord, tCover;
     TextBox tSpId;
@@ -118,6 +124,13 @@ class SettingsForm : Form
             Controls.Add(p);
             pages[i] = p;
         }
+        pageSearch = new Panel();
+        pageSearch.Location = new Point(190, 0);
+        pageSearch.Size = new Size(630, 546);
+        pageSearch.BackColor = BG;
+        pageSearch.AutoScroll = true;
+        pageSearch.Visible = false;
+        Controls.Add(pageSearch);
         BuildBottomBar();
         BuildGeneral(pages[0]);
         BuildControls(pages[1]);
@@ -242,17 +255,6 @@ class SettingsForm : Form
         tSearch.TextChanged += delegate { SearchNow(); };
         side.Controls.Add(tSearch);
 
-        lbSearch = new ListBox();
-        lbSearch.Location = new Point(14, 472);
-        lbSearch.Size = new Size(162, 96);
-        lbSearch.BackColor = FIELD;
-        lbSearch.ForeColor = Color.White;
-        lbSearch.BorderStyle = BorderStyle.None;
-        lbSearch.Font = new Font("Segoe UI", 8.5f);
-        lbSearch.IntegralHeight = false;
-        lbSearch.Visible = false;
-        lbSearch.Click += delegate { SearchPick(); };
-        side.Controls.Add(lbSearch);
 
         lSideVer = new Label();
         lSideVer.ForeColor = Color.FromArgb(120, 120, 120);
@@ -293,42 +295,117 @@ class SettingsForm : Form
         bar.Controls.Add(bSave);
     }
 
-    // Funktionen suchen: findet Beschriftungen in allen Tabs und springt dorthin
+    // Funktionen suchen: die passenden Einstellungen erscheinen direkt im Einstellungsfenster (nicht als Liste zum Anklicken)
     void SearchNow()
     {
+        if (searchBusy) return;
+        SearchRestore();
         string q = tSearch.Text.Trim().ToLower();
-        lbSearch.Items.Clear();
-        searchTabs.Clear();
-        if (q.Length < 2) { lbSearch.Visible = false; return; }
+        if (q.Length < 2)
+        {
+            pageSearch.Visible = false;
+            for (int k = 0; k < TABS; k++) pages[k].Visible = k == curTab;
+            return;
+        }
+        for (int k = 0; k < TABS; k++) pages[k].Visible = false;
+        pageSearch.Visible = true;
+        pageSearch.BringToFront();
+        pageSearch.AutoScrollPosition = new Point(0, 0);
+        int y = 16;
+        bool any = false;
         for (int k = 0; k < TABS; k++)
         {
-            List<string> found = new List<string>();
-            SearchCollect(pages[k], q, found);
-            foreach (string f in found)
+            List<Control> hits = new List<Control>();
+            SearchCollect(pages[k], q, hits);
+            List<Control> done = new List<Control>();
+            bool headed = false;
+            foreach (Control hit in hits)
             {
-                if (searchTabs.Count >= 12) break;
-                lbSearch.Items.Add(nav[k].Text + ": " + (f.Length > 30 ? f.Substring(0, 30) + "..." : f));
-                searchTabs.Add(k);
+                if (done.Contains(hit)) continue;
+                Control par = hit.Parent;
+                int top = hit.Top, bottom = hit.Bottom;
+                List<Control> band = new List<Control>();
+                foreach (Control sib in par.Controls)
+                    if (sib.Bottom > top - 2 && sib.Top < bottom + 2 && !done.Contains(sib) && !(sib is Panel)) band.Add(sib);
+                if (band.Count == 0) continue;
+                int bandTop = int.MaxValue, bandBottom = 0;
+                foreach (Control bc in band)
+                {
+                    if (bc.Top < bandTop) bandTop = bc.Top;
+                    if (bc.Bottom > bandBottom) bandBottom = bc.Bottom;
+                }
+                if (!headed)
+                {
+                    Label h = new Label();
+                    h.Text = nav[k].Text.ToUpper();
+                    h.ForeColor = GREEN;
+                    h.BackColor = BG;
+                    h.Font = new Font("Segoe UI", 9f, FontStyle.Bold);
+                    h.Location = new Point(36, y);
+                    h.Size = new Size(560, 20);
+                    pageSearch.Controls.Add(h);
+                    searchTemp.Add(h);
+                    y += 26;
+                    headed = true;
+                }
+                foreach (Control bc in band)
+                {
+                    movedC.Add(bc);
+                    movedP.Add(par);
+                    movedL.Add(bc.Location);
+                    done.Add(bc);
+                }
+                foreach (Control bc in band)
+                {
+                    int ny = y + (bc.Top - bandTop);
+                    bc.Parent = pageSearch;
+                    bc.Location = new Point(bc.Left, ny);
+                }
+                y += (bandBottom - bandTop) + 12;
+                any = true;
             }
         }
-        lbSearch.Visible = lbSearch.Items.Count > 0;
+        if (!any)
+        {
+            Label none = new Label();
+            none.Text = Lang.T("srch_none");
+            none.ForeColor = DIM;
+            none.BackColor = BG;
+            none.Font = new Font("Segoe UI", 10f);
+            none.Location = new Point(36, 20);
+            none.Size = new Size(560, 24);
+            pageSearch.Controls.Add(none);
+            searchTemp.Add(none);
+        }
     }
 
-    static void SearchCollect(Control c, string q, List<string> found)
+    static void SearchCollect(Control c, string q, List<Control> hits)
     {
         foreach (Control ch in c.Controls)
         {
-            if ((ch is Label || ch is Toggle || ch is FlatBtn) && ch.Text.Length > 2 && ch.Text.ToLower().Contains(q) && !found.Contains(ch.Text))
-                found.Add(ch.Text);
-            SearchCollect(ch, q, found);
+            if ((ch is Label || ch is Toggle || ch is FlatBtn) && ch.Text.Length > 2 && ch.Text.ToLower().Contains(q))
+                hits.Add(ch);
+            SearchCollect(ch, q, hits);
         }
     }
 
-    void SearchPick()
+    // Alles, was fuer die Suche verschoben wurde, wieder an seinen Platz bringen
+    void SearchRestore()
     {
-        int i = lbSearch.SelectedIndex;
-        if (i < 0 || i >= searchTabs.Count) return;
-        ShowTab(searchTabs[i]);
+        for (int i = movedC.Count - 1; i >= 0; i--)
+        {
+            movedC[i].Parent = movedP[i];
+            movedC[i].Location = movedL[i];
+        }
+        movedC.Clear();
+        movedP.Clear();
+        movedL.Clear();
+        foreach (Control t in searchTemp)
+        {
+            pageSearch.Controls.Remove(t);
+            t.Dispose();
+        }
+        searchTemp.Clear();
     }
 
     // Nur den aktuellen Tab auf die Standardwerte zuruecksetzen
@@ -389,6 +466,14 @@ class SettingsForm : Form
     void ShowTab(int i)
     {
         curTab = i;
+        if (pageSearch != null && (pageSearch.Visible || (tSearch != null && tSearch.Text.Length > 0)))
+        {
+            SearchRestore();
+            pageSearch.Visible = false;
+            searchBusy = true;
+            tSearch.Text = "";
+            searchBusy = false;
+        }
         for (int k = 0; k < TABS; k++)
         {
             pages[k].Visible = (k == i);
@@ -481,9 +566,21 @@ class SettingsForm : Form
         bDcRetry.Click += delegate { ov.ReconnectDiscord(); };
         p.Controls.Add(bDcRetry);
         lDcHelp = Lbl(p, 36, 216, 560, 34, 9f, DIM, FontStyle.Regular);
-        gCap = Group(p, 452);
+        gCap = Group(p, 442);
         tCap = Tog(p, 482);
-        lCapHint = Lbl(p, 36, 512, 560, 34, 9f, DIM, FontStyle.Regular);
+        tCap.Visible = false;
+        bShare = new FlatBtn("", GREEN, Color.Black);
+        bShare.Location = new Point(36, 470);
+        bShare.Size = new Size(250, 32);
+        bShare.Click += delegate { ov.ToggleShare(); };
+        p.Controls.Add(bShare);
+        lCapHint = Lbl(p, 296, 466, 300, 40, 9f, DIM, FontStyle.Regular);
+        bVolTest = new FlatBtn("", FIELD, Color.White);
+        bVolTest.Location = new Point(36, 508);
+        bVolTest.Size = new Size(200, 30);
+        bVolTest.Click += delegate { VolTest(); };
+        p.Controls.Add(bVolTest);
+        lVolTest = Lbl(p, 246, 506, 350, 36, 8.5f, DIM, FontStyle.Regular);
 
         gSpotify = Group(p, 252);
         lSpId = Lbl(p, 36, 284, 560, 22, 9.5f, DIM, FontStyle.Regular);
@@ -535,18 +632,33 @@ class SettingsForm : Form
     }
 
     // Ein Link: direkt oeffnen. Mehrere Links: kleines Menue unter dem Knopf.
+    // Lautstaerke-Test: zeigt, was Windows und Spotify melden (hilft, wenn Overlay und Spotify nicht gleich laut sind)
+    void VolTest()
+    {
+        lVolTest.Text = Lang.T("set_checking");
+        System.Threading.Thread t = new System.Threading.Thread(delegate()
+        {
+            string win = SpotifyAudio.Debug();
+            string api = "not logged in";
+            if (SpotifyApi.LoggedIn)
+            {
+                int pv = -1;
+                try { pv = SpotifyApi.GetVolume(); }
+                catch { }
+                api = pv >= 0 ? pv + "%" : "n/a";
+            }
+            try { BeginInvoke(new Action(delegate { lVolTest.Text = "Windows: " + win + "   Spotify: " + api; })); }
+            catch { }
+        });
+        t.IsBackground = true;
+        t.Start();
+    }
+
     void ShowDonate()
     {
         List<KeyValuePair<string, string>> l = Contact.DonateLinks();
         if (l.Count == 0) return;
-        if (l.Count == 1) { Open(l[0].Value); return; }
-        ContextMenuStrip m = new ContextMenuStrip();
-        foreach (KeyValuePair<string, string> d in l)
-        {
-            string url = d.Value;
-            m.Items.Add(d.Key, null, delegate { Open(url); });
-        }
-        m.Show(bDonate, new Point(0, bDonate.Height));
+        using (DonateForm f = new DonateForm(l)) f.ShowDialog(this);
     }
 
     void BuildDesign(Panel p)
@@ -1136,6 +1248,8 @@ class SettingsForm : Form
         gCap.Text = Lang.T("cap_grp").ToUpper();
         tCap.Text = Lang.T("cap_toggle");
         lCapHint.Text = Lang.T("cap_hint");
+        bShare.Text = Lang.T("share_btn");
+        bVolTest.Text = Lang.T("vol_test");
         gSpotify.Text = Lang.T("grp_spotify").ToUpper();
         lSpId.Text = Lang.T("set_spid");
         lSpHint.Text = Lang.T("set_spid_hint");
@@ -1298,5 +1412,66 @@ class SettingsForm : Form
             }
         }
         catch { }
+    }
+}
+
+// Spenden-Fenster: freundlich, freiwillig, mit einem Knopf pro Betrag
+class DonateForm : Form
+{
+    static readonly Color BG = Color.FromArgb(24, 24, 24);
+    static readonly Color FIELD = Color.FromArgb(40, 40, 40);
+    static readonly Color GREEN = Color.FromArgb(29, 185, 84);
+
+    public DonateForm(List<KeyValuePair<string, string>> links)
+    {
+        Text = Lang.T("set_donate");
+        FormBorderStyle = FormBorderStyle.FixedDialog;
+        StartPosition = FormStartPosition.CenterParent;
+        MaximizeBox = false;
+        MinimizeBox = false;
+        ShowInTaskbar = false;
+        BackColor = BG;
+        int w = 400;
+        int y = 20;
+
+        Label head = new Label();
+        head.Text = Lang.T("donate_head");
+        head.ForeColor = GREEN;
+        head.BackColor = BG;
+        head.Font = new Font("Segoe UI", 14f, FontStyle.Bold);
+        head.Location = new Point(24, y);
+        head.Size = new Size(w - 48, 30);
+        Controls.Add(head);
+        y += 38;
+
+        Label info = new Label();
+        info.Text = Lang.T("donate_text");
+        info.ForeColor = Color.FromArgb(190, 190, 190);
+        info.BackColor = BG;
+        info.Font = new Font("Segoe UI", 9.5f);
+        info.Location = new Point(24, y);
+        info.Size = new Size(w - 48, 58);
+        Controls.Add(info);
+        y += 68;
+
+        foreach (KeyValuePair<string, string> d in links)
+        {
+            string url = d.Value;
+            FlatBtn b = new FlatBtn(d.Key, FIELD, Color.White);
+            b.Location = new Point(24, y);
+            b.Size = new Size(w - 48, 40);
+            b.Click += delegate { try { Process.Start(url); } catch { } };
+            Controls.Add(b);
+            y += 48;
+        }
+
+        y += 6;
+        FlatBtn close = new FlatBtn(Lang.T("set_close"), BG, Color.FromArgb(170, 170, 170));
+        close.Location = new Point(24, y);
+        close.Size = new Size(w - 48, 36);
+        close.Click += delegate { Close(); };
+        Controls.Add(close);
+        y += 46;
+        ClientSize = new Size(w, y);
     }
 }

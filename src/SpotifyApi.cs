@@ -284,6 +284,30 @@ static class SpotifyApi
     }
 
     // 0 = wird abgespielt, 1 = kein Premium (Playlist in Spotify geoeffnet), 2 = nur in Spotify geoeffnet
+    // Lautstaerke des aktiven Spotify-Geraets in Prozent (das ist der Regler in Spotify selbst), -1 wenn nicht verfuegbar
+    public static int GetVolume()
+    {
+        try
+        {
+            int st;
+            string r = Call("GET", "https://api.spotify.com/v1/me/player", null, out st);
+            if (st != 200 || string.IsNullOrEmpty(r)) return -1;
+            object dev = Json.Get(Json.Parse(r), "device");
+            if (dev == null) return -1;
+            object vp = Json.Get(dev, "volume_percent");
+            if (vp == null) return -1;
+            return (int)Math.Round(Convert.ToDouble(vp, System.Globalization.CultureInfo.InvariantCulture));
+        }
+        catch { return -1; }
+    }
+
+    public static int SetVolume(int percent)
+    {
+        int st;
+        Call("PUT", "https://api.spotify.com/v1/me/player/volume?volume_percent=" + Math.Max(0, Math.Min(100, percent)), null, out st);
+        return st;
+    }
+
     // Zufall und Wiederholen ueber die Spotify-Schnittstelle (braucht Premium)
     public static int SetShuffle(bool on)
     {

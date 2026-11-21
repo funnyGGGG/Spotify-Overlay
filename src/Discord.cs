@@ -163,32 +163,167 @@ class DiscordRpc
         return a.Contains(b) || b.Contains(a) || a.Substring(0, Math.Min(6, a.Length)) == b.Substring(0, Math.Min(6, b.Length));
     }
 
-    static string CoverFor(string artist, string title)
+    static string Fetch(string url, int timeout)
+    {
+        return Fetch(url, timeout, "SpotifyOverlay");
+    }
+
+    static string Fetch(string url, int timeout, string agent)
+    {
+        HttpWebRequest rq = (HttpWebRequest)WebRequest.Create(url);
+        rq.UserAgent = agent;
+        rq.Timeout = timeout;
+        using (WebResponse rs = rq.GetResponse())
+        using (StreamReader sr = new StreamReader(rs.GetResponseStream()))
+            return sr.ReadToEnd();
+    }
+
+    // Gibt es das Bild? Dann die endgueltige Adresse (nach einer Weiterleitung), sonst ""
+    static string ImageUrl(string url)
+    {
+        try
+        {
+            HttpWebRequest rq = (HttpWebRequest)WebRequest.Create(url);
+            rq.Method = "HEAD";
+            rq.UserAgent = "SpotifyOverlay";
+            rq.Timeout = 4000;
+            using (HttpWebResponse rs = (HttpWebResponse)rq.GetResponse())
+                return rs.StatusCode == HttpStatusCode.OK ? rs.ResponseUri.ToString() : "";
+        }
+        catch { return ""; }
+    }
+
+    // erster Kuenstler (vor Komma, & oder feat.)
+    static string FirstArtist(string artist)
+    {
+        if (string.IsNullOrEmpty(artist)) return "";
+        int cut = artist.Length;
+        foreach (string sep in new string[] { ",", " & ", " feat", " ft.", ";" })
+        {
+            int i = artist.IndexOf(sep, StringComparison.OrdinalIgnoreCase);
+            if (i > 0 && i < cut) cut = i;
+        }
+        return artist.Substring(0, cut).Trim();
+    }
+
+    // Datenbank 1 und 2: iTunes (zwei Laender), mehrere Treffer pruefen und den passenden nehmen
+    static string CoverItunes(string artist, string title, string country)
+    {
+        string first = FirstArtist(artist);
+        string json = Fetch("https://itunes.apple.com/search?media=music&entity=song&limit=8" + (country.Length > 0 ? "&country=" + country : "") + "&term=" + Uri.EscapeDataString(first + " " + title), 4000);
+        List<object> res = Json.Get(Json.Parse(json), "results") as List<object>;
+        if (res != null)
+            foreach (object r in res)
+                if (Similar(Json.Str(r, "trackName"), title) && Similar(Json.Str(r, "artistName"), first))
+                    return Json.Str(r, "artworkUrl100").Replace("100x100bb", "512x512bb");
+        return "";
+    }
+
+    // Datenbank 3: Deezer
+    static string CoverDeezer(string artist, string title)
+    {
+        string first = FirstArtist(artist);
+        string json = Fetch("https://api.deezer.com/search?limit=8&q=" + Uri.EscapeDataString(first + " " + title), 4000);
+        List<object> res = Json.Get(Json.Parse(json), "data") as List<object>;
+        if (res != null)
+            foreach (object r in res)
+            {
+                object al = Json.Get(r, "album");
+                object ar = Json.Get(r, "artist");
+                if (al == null || ar == null) continue;
+                if (Similar(Json.Str(r, "title"), title) && Similar(Json.Str(ar, "name"), first))
+                {
+                    string u = Json.Str(al, "cover_big");
+                    if (u.Length == 0) u = Json.Str(al, "cover_medium");
+                    if (u.Length > 0) return u;
+                }
+            }
+        return "";
+    }
+
+    // Datenbank 4: MusicBrainz findet die Aufnahme, das Cover Art Archive liefert das Bild
+    static string CoverBrainz(string artist, string title)
+    {
+        string first = FirstArtist(artist);
+        string q = "recording:\"" + title.Replace("\"", " ") + "\" AND artist:\"" + first.Replace("\"", " ") + "\"";
+        string json = Fetch("https://musicbrainz.org/ws/2/recording/?fmt=json&limit=5&query=" + Uri.EscapeDataString(q), 5000, "SpotifyOverlay/2.1 ( https://github.com/funnyGGGG/Spotify-Overlay )");
+        List<object> recs = Json.Get(Json.Parse(json), "recordings") as List<object>;
+        if (recs == null) return "";
+        foreach (object r in recs)
+        {
+            if (!Similar(Json.Str(r, "title"), title)) continue;
+            List<object> rels = Json.Get(r, "releases") as List<object>;
+            if (rels == null) continue;
+            int n = 0;
+            foreach (object rel in rels)
+            {
+                if (++n > 3) break;
+                string id = Json.Str(rel, "id");
+                if (id.Length == 0) continue;
+                string u = ImageUrl("https://coverartarchive.org/release/" + id + "/front-500");
+                if (u.Length > 0) return u;
+            }
+        }
+        return "";
+    }
+
+    // Datenbank 5: TheAudioDB
+    static string CoverAudioDb(string artist, string title)
+    {
+        string json = Fetch("https://www.theaudiodb.com/api/v1/json/2/searchtrack.php?s=" + Uri.EscapeDataString(FirstArtist(artist)) + "&t=" + Uri.EscapeDataString(title), 4000);
+        List<object> res = Json.Get(Json.Parse(json), "track") as List<object>;
+        if (res != null && res.Count > 0)
+            return Json.Str(res[0], "strTrackThumb");
+        return "";
+    }
+
+    static string Safe(Func<string> f, ref bool failed)
+    {
+        try { return f() ?? ""; }
+        catch { failed = true; return ""; }
+    }
+
+    static Dictionary<string, int> coverTries = new Dictionary<string, int>();
+
+    public static string CoverFor(string artist, string title)
+    {
+        return CoverFor(artist, title, 6000);
+    }
+
+    // Probiert nacheinander mehrere Bild-Datenbanken, bis eine ein passendes Bild hat (hoechstens budgetMs Millisekunden).
+    // Gefundene Bilder werden gemerkt. Bei Netzwerkfehlern oder Zeitablauf wird spaeter neu versucht (hoechstens 3 Mal).
+    public static string CoverFor(string artist, string title, int budgetMs)
     {
         string k = artist + "|" + title;
         lock (covers) { string c; if (covers.TryGetValue(k, out c)) return c; }
         string url = "";
-        try
+        bool failed = false;
+        DateTime t0 = DateTime.Now;
+        ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+        url = Safe(delegate { return CoverItunes(artist, title, ""); }, ref failed);
+        if (url.Length == 0 && (DateTime.Now - t0).TotalMilliseconds < budgetMs)
+            url = Safe(delegate { return CoverItunes(artist, title, "DE"); }, ref failed);
+        if (url.Length == 0 && (DateTime.Now - t0).TotalMilliseconds < budgetMs)
+            url = Safe(delegate { return CoverDeezer(artist, title); }, ref failed);
+        if (url.Length == 0 && (DateTime.Now - t0).TotalMilliseconds < budgetMs)
+            url = Safe(delegate { return CoverBrainz(artist, title); }, ref failed);
+        if (url.Length == 0 && (DateTime.Now - t0).TotalMilliseconds < budgetMs)
+            url = Safe(delegate { return CoverAudioDb(artist, title); }, ref failed);
+        if (url.Length == 0 && (DateTime.Now - t0).TotalMilliseconds >= budgetMs) failed = true;
+        lock (covers)
         {
-            ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
-            HttpWebRequest rq = (HttpWebRequest)WebRequest.Create("https://itunes.apple.com/search?media=music&entity=song&limit=1&term=" + Uri.EscapeDataString(artist + " " + title));
-            rq.UserAgent = "SpotifyOverlay";
-            rq.Timeout = 4000;
-            string json;
-            using (WebResponse rs = rq.GetResponse())
-            using (StreamReader sr = new StreamReader(rs.GetResponseStream()))
-                json = sr.ReadToEnd();
-            List<object> res = Json.Get(Json.Parse(json), "results") as List<object>;
-            if (res != null && res.Count > 0)
-            {
-                object r = res[0];
-                if (Similar(Json.Str(r, "trackName"), title) && Similar(Json.Str(r, "artistName"), artist))
-                    url = Json.Str(r, "artworkUrl100").Replace("100x100bb", "512x512bb");
-            }
+            int n;
+            coverTries.TryGetValue(k, out n);
+            n++;
+            coverTries[k] = n;
+            if (url.Length > 0 || !failed || n >= 3) covers[k] = url;
         }
-        catch { }
-        lock (covers) { covers[k] = url; }
         return url;
+    }
+
+    static bool CoverPending(string artist, string title)
+    {
+        lock (covers) { return !covers.ContainsKey(artist + "|" + title); }
     }
 
     static string ErrorOf(string reply)
@@ -222,6 +357,8 @@ class DiscordRpc
                 }
                 if (!ok) throw new IOException(ErrorOf(reply));
                 if (active) Status = "OK - activity sent (pipe " + pipeIdx + ")";
+                if (active && showCover && CoverPending(artist, title))
+                    ThreadPool.QueueUserWorkItem(delegate { Thread.Sleep(8000); lastKey = "?"; });   // Bild noch nicht da: spaeter noch einmal
             }
             catch (Exception ex)
             {

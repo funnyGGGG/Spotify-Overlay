@@ -34,6 +34,7 @@ static class Config
     public static bool Capturable = false;      // Overlay als Fenster teilbar (Discord, OBS), nach Neustart
     public static bool Waves = false;           // Mini-Wellen
     public static bool ShufRep = false;         // Knoepfe fuer Zufall und Wiederholen im Overlay
+    public static string LastVersion = "";      // zuletzt gestartete Version (fuer das "Was ist neu"-Tutorial)
     public static int VolStep = 5;              // Lautstaerke-Schritt der Tastenkuerzel in Prozent
     public static string Profiles = "";         // Spiele-Profile (siehe GameProfiles.cs)
 
@@ -89,6 +90,7 @@ static class Config
                     Capturable = GetInt(k, "Capturable", 0) == 1;
                     Waves = GetInt(k, "Waves", 0) == 1;
                     ShufRep = GetInt(k, "ShufRep", 0) == 1;
+                    LastVersion = (k.GetValue("LastVersion") as string) ?? "";
                     VolStep = GetInt(k, "VolStep", 5);
                     if (VolStep < 1 || VolStep > 25) VolStep = 5;
                     Profiles = (k.GetValue("Profiles") as string) ?? "";
@@ -142,6 +144,7 @@ static class Config
                 k.SetValue("Capturable", Capturable ? 1 : 0);
                 k.SetValue("Waves", Waves ? 1 : 0);
                 k.SetValue("ShufRep", ShufRep ? 1 : 0);
+                k.SetValue("LastVersion", LastVersion ?? "");
                 k.SetValue("VolStep", VolStep);
                 k.SetValue("Profiles", Profiles ?? "");
                 if (LyX != int.MinValue) k.SetValue("LyX", LyX);

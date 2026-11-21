@@ -156,6 +156,14 @@ class Overlay : Form
     bool pp = Config.PerPixel;          // erweiterte Transparenz (Alpha pro Pixel), gilt ab dem Start
     double ppOpacity = 1.0;
     bool ppQueued = false;
+    volatile bool apiOk = false;        // Lautstaerke kommt ueber die Spotify-Schnittstelle (genau wie der Regler in Spotify)
+    DateTime apiNext = DateTime.MinValue;
+    ShareForm share;
+    bool profileSetClick = false;       // Durchklickbar wurde von einem Profil eingeschaltet
+    bool internalClick = false;
+    int coverGen = 0;
+    int streamTick = 0;
+    bool wasIdle = true;                // gerade kein Song: dann zeigt das Overlay das Logo
     bool shuffleOn = false;             // Zufall an
     int repeatMode = 0;                 // 0 aus, 1 Playlist, 2 Titel
     DateTime modeHold = DateTime.MinValue;
@@ -236,6 +244,7 @@ class Overlay : Form
             CreateParams cp = base.CreateParams;
             cp.ExStyle |= Config.Capturable ? 0x08000000 : (0x08000000 | 0x80);   // NOACTIVATE (+ TOOLWINDOW): nimmt dem Spiel nie den Fokus
             if (pp) cp.ExStyle |= 0x80000;   // LAYERED: Alpha pro Pixel
+            if (clickThrough) cp.ExStyle |= 0x20;   // Durchklickbar bleibt an
             return cp;
         }
     }
@@ -308,6 +317,50 @@ class Overlay : Form
         return bmp;
     }
 
+    // Platzhalter fuer einen Song, zu dem es nirgends ein Bild gibt (das Logo ist nur fuer "kein Song")
+    static Image Placeholder()
+    {
+        Bitmap bmp = new Bitmap(112, 112);
+        using (Graphics g = Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.Clear(Color.FromArgb(48, 48, 52));
+            using (Font f = new Font("Segoe UI Symbol", 56f, FontStyle.Regular, GraphicsUnit.Pixel))
+            using (SolidBrush b = new SolidBrush(Color.FromArgb(150, 150, 158)))
+            using (StringFormat mid = new StringFormat())
+            {
+                mid.Alignment = StringAlignment.Center;
+                mid.LineAlignment = StringAlignment.Center;
+                g.DrawString("\u266A", f, b, new RectangleF(0, 0, 112, 112), mid);
+            }
+        }
+        return bmp;
+    }
+
+    // Bild aus dem Internet holen (mit Zeitlimit)
+    static Image DownloadImage(string url)
+    {
+        try
+        {
+            System.Net.ServicePointManager.SecurityProtocol = (System.Net.SecurityProtocolType)3072;
+            System.Net.HttpWebRequest rq = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+            rq.UserAgent = "SpotifyOverlay";
+            rq.Timeout = 6000;
+            using (System.Net.WebResponse rs = rq.GetResponse())
+            using (Stream st = rs.GetResponseStream())
+            using (MemoryStream ms = new MemoryStream())
+            {
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = st.Read(buf, 0, buf.Length)) > 0) ms.Write(buf, 0, n);
+                ms.Position = 0;
+                using (Image src = Image.FromStream(ms)) return new Bitmap(src);
+            }
+        }
+        catch { return null; }
+    }
+
     // Bild in der aktuellen Groesse vorbereiten, damit das Zeichnen schnell bleibt
     void RebuildCover()
     {
@@ -351,18 +404,40 @@ class Overlay : Form
 
     void LoadCover()
     {
+        int gen = Interlocked.Increment(ref coverGen);
         Thread.Sleep(1200);
         SyncTimeline();
         Image img = null;
         string mt = "", ma = "";
-        try { Media.GetMeta(out mt, out ma, out img); } catch { }
-        if (img == null) img = Fallback();
-        Image rounded = Round(img, 112);
+        // Das Bild ist nicht immer sofort da: bis zu 6 Mal nachfragen
+        for (int attempt = 0; attempt < 6 && img == null; attempt++)
+        {
+            try { Media.GetMeta(out mt, out ma, out img); } catch { }
+            if (img == null) Thread.Sleep(900);
+            if (gen != coverGen) return;
+        }
+        if (gen != coverGen) return;
         bool ad = isAd;
+        if (img == null && !ad)
+        {
+            // In Spotify fehlt das Bild: in mehreren Bild-Datenbanken suchen (iTunes, Deezer, MusicBrainz, TheAudioDB)
+            string qa = ma.Length > 0 ? ma : trackArtist;
+            string qt = mt.Length > 0 ? mt : trackTitle;
+            try
+            {
+                string curl = DiscordRpc.CoverFor(qa, qt, 20000);
+                if (!string.IsNullOrEmpty(curl)) img = DownloadImage(curl);
+            }
+            catch { }
+            if (gen != coverGen) return;
+        }
+        if (img == null) img = ad ? Fallback() : Placeholder();
+        Image rounded = Round(img, 112);
         try
         {
             BeginInvoke(new Action(delegate
             {
+                if (wasIdle && !ad) return;   // inzwischen laeuft kein Song mehr
                 cover = rounded;
                 RebuildCover();
                 Streamer.SetCover(cover);
@@ -422,7 +497,7 @@ class Overlay : Form
                     catch { fails++; }
                 }
                 float v = -1f;
-                bool readVol = Config.Volume && !volDrag && DateTime.Now >= nextVol;
+                bool readVol = Config.Volume && !volDrag && !apiOk && DateTime.Now >= nextVol;
                 if (readVol) { v = SpotifyAudio.Get(); nextVol = DateTime.Now.AddMilliseconds(600); }
                 int modeShuf = -1, modeRep = -1;
                 if (Config.ShufRep)
@@ -495,8 +570,19 @@ class Overlay : Form
             try
             {
                 if (!Config.Volume || volDrag || !running) continue;
-                float v = SpotifyAudio.Get();
-                if (v >= 0f) wVol = v;
+                // Mit Spotify-Anmeldung: Lautstaerke direkt von Spotify holen, dann stimmt sie exakt mit dem Regler in Spotify ueberein
+                if (SpotifyApi.LoggedIn && DateTime.Now >= apiNext)
+                {
+                    apiNext = DateTime.Now.AddMilliseconds(apiOk ? 1200 : 15000);
+                    int pv = SpotifyApi.GetVolume();
+                    if (pv >= 0) { apiOk = true; wVol = pv / 100f; }
+                    else apiOk = false;
+                }
+                if (!apiOk)
+                {
+                    float v = SpotifyAudio.Get();
+                    if (v >= 0f) wVol = v;
+                }
             }
             catch { }
         }
@@ -613,7 +699,13 @@ class Overlay : Form
                 foreach (Screen sc in Screen.AllScreens)
                     if (sc.WorkingArea.Contains(pp)) { Location = pp; break; }
             }
-            if (clickThrough != m.Click) SetClickThrough(m.Click);
+            if (m.Click && !clickThrough)
+            {
+                internalClick = true;
+                SetClickThrough(true);
+                internalClick = false;
+                profileSetClick = true;
+            }
         }
         else
         {
@@ -625,7 +717,16 @@ class Overlay : Form
             Config.Volume = Config.BaseVolume;
             ApplySettings();
             if (Config.BaseX != int.MinValue) Location = new Point(Config.BaseX, Config.BaseY);
-            if (clickThrough != baseClick) SetClickThrough(baseClick);
+            if (profileSetClick)
+            {
+                profileSetClick = false;
+                if (clickThrough)
+                {
+                    internalClick = true;
+                    SetClickThrough(false);
+                    internalClick = false;
+                }
+            }
         }
     }
 
@@ -635,7 +736,20 @@ class Overlay : Form
         {
             volEvent.WaitOne();
             if (Exiting) return;
-            SpotifyAudio.Set(pendingVol);
+            if (apiOk)
+            {
+                int pst = 0;
+                try { pst = SpotifyApi.SetVolume((int)Math.Round(pendingVol * 100)); }
+                catch { pst = 0; }
+                if (pst < 200 || pst >= 300)
+                {
+                    // geht nicht (zum Beispiel ohne Premium): normal ueber Windows regeln
+                    apiOk = false;
+                    apiNext = DateTime.Now.AddSeconds(60);
+                    SpotifyAudio.Set(pendingVol);
+                }
+            }
+            else SpotifyAudio.Set(pendingVol);
         }
     }
 
@@ -715,6 +829,11 @@ class Overlay : Form
         {
             if (marqNeed && Visible)
                 Invalidate(new Rectangle((int)(56 * scale), (int)(6 * scale), (int)(168 * scale) + 2, (int)(36 * scale)));
+            if (Config.StreamWeb && Streamer.WebRunning && ++streamTick >= 2)
+            {
+                streamTick = 0;
+                Streamer.SetOverlay(Snapshot(0, 0));
+            }
         };
         marqTimer.Start();
 
@@ -727,6 +846,7 @@ class Overlay : Form
         ContextMenuStrip m = new ContextMenuStrip();
         m.Items.Add(Lang.T("tray_toggle"), null, delegate { TaskbarClick(); });
         m.Items.Add(Lang.T("tray_lyrics"), null, delegate { ToggleLyrics(); });
+        m.Items.Add(Lang.T("tray_share"), null, delegate { ToggleShare(); });
         ToolStripMenuItem ct = new ToolStripMenuItem(Lang.T("tray_click"));
         ct.Checked = clickThrough;
         ct.Click += delegate { SetClickThrough(!clickThrough); };
@@ -783,6 +903,7 @@ class Overlay : Form
     // Durchklickbar: Mausklicks gehen durch das Overlay hindurch zum Spiel
     void SetClickThrough(bool on)
     {
+        if (!internalClick) profileSetClick = false;   // von Hand geaendert: ein Profil schaltet es nicht mehr aus
         clickThrough = on;
         try
         {
@@ -800,6 +921,21 @@ class Overlay : Form
     {
         WelcomeForm w = new WelcomeForm();
         w.Show();
+    }
+
+    // Nach einem Update: kurze Tour mit dem, was neu ist
+    public void ShowWhatsNew()
+    {
+        WelcomeForm w = new WelcomeForm(true);
+        w.Show();
+    }
+
+    // Eigenes Fenster mit einer Live-Kopie des Overlays: in Discord oder OBS als normales Fenster waehlbar
+    public void ToggleShare()
+    {
+        if (share != null && !share.IsDisposed) { share.Close(); share = null; return; }
+        share = new ShareForm(this);
+        share.Show();
     }
 
     public void ResetPosition()
@@ -1474,10 +1610,21 @@ class Overlay : Form
         // Erster Start: kurze Tour zeigen
         if (!Config.Welcome)
         {
+            Config.LastVersion = App.Version;
             System.Windows.Forms.Timer wt = new System.Windows.Forms.Timer();
             wt.Interval = 1500;
             wt.Tick += delegate { wt.Stop(); wt.Dispose(); ShowWelcome(); };
             wt.Start();
+        }
+        else if (Config.LastVersion != App.Version)
+        {
+            // neue Version installiert: einmal zeigen, was neu ist
+            Config.LastVersion = App.Version;
+            Config.Save();
+            System.Windows.Forms.Timer nt = new System.Windows.Forms.Timer();
+            nt.Interval = 1500;
+            nt.Tick += delegate { nt.Stop(); nt.Dispose(); ShowWhatsNew(); };
+            nt.Start();
         }
     }
 
@@ -1692,6 +1839,26 @@ class Overlay : Form
             changed = true;
         }
 
+        // Kein Song: das Logo zeigen. Sobald wieder einer laeuft: sein Bild holen.
+        bool idleNow = !(running && hasSong) && !isAd;
+        if (idleNow != wasIdle)
+        {
+            wasIdle = idleNow;
+            if (idleNow)
+            {
+                cover = Round(Fallback(), 112);
+                RebuildCover();
+                Streamer.SetCover(cover);
+                changed = true;
+            }
+            else
+            {
+                Thread tc = new Thread(LoadCover);
+                tc.IsBackground = true;
+                tc.Start();
+            }
+        }
+
         if (changed) Invalidate();
 
         rpc.Update(Config.Discord, DiscordRpc.DefaultId, trackTitle, trackArtist, playing && !isAd, posSec, durSec, running && hasSong && !isAd, Config.DiscordCover);
@@ -1721,5 +1888,57 @@ class Overlay : Form
             Application.EnableVisualStyles();
             Application.Run(new Overlay());
         }
+    }
+}
+
+// Eigenes Fenster mit einer Live-Kopie des Overlays: In Discord oder OBS als normales Fenster auswaehlbar
+class ShareForm : Form
+{
+    Overlay ov;
+    PictureBox pic;
+    System.Windows.Forms.Timer timer;
+
+    public ShareForm(Overlay o)
+    {
+        ov = o;
+        Text = "Spotify Overlay (Übertragung / Stream)";
+        StartPosition = FormStartPosition.CenterScreen;
+        BackColor = Color.FromArgb(16, 16, 16);
+        ClientSize = new Size(Math.Max(300, o.Width + 20), Math.Max(100, o.Height + 20));
+        MinimumSize = new Size(220, 120);
+        pic = new PictureBox();
+        pic.Dock = DockStyle.Fill;
+        pic.SizeMode = PictureBoxSizeMode.Zoom;
+        pic.BackColor = BackColor;
+        Controls.Add(pic);
+        try { Icon = o.Icon; }
+        catch { }
+        timer = new System.Windows.Forms.Timer();
+        timer.Interval = 100;
+        timer.Tick += delegate { Grab(); };
+        timer.Start();
+        Grab();
+    }
+
+    void Grab()
+    {
+        try
+        {
+            Bitmap b = ov.Snapshot(0, 0);
+            Image old = pic.Image;
+            pic.Image = b;
+            if (old != null) old.Dispose();
+        }
+        catch { }
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        timer.Stop();
+        timer.Dispose();
+        Image old = pic.Image;
+        pic.Image = null;
+        if (old != null) old.Dispose();
+        base.OnFormClosed(e);
     }
 }

@@ -21,11 +21,17 @@ class WelcomeForm : Form
     const int Pages = 5;
 
     int page = 0;
+    bool whatsNew = false;      // Tour nach einem Update statt der Willkommens-Tour
+    string pre = "tour";
     Image logo;
     FlatBtn bNext, bBack, bSkip;
 
-    public WelcomeForm()
+    public WelcomeForm() : this(false) { }
+
+    public WelcomeForm(bool news)
     {
+        whatsNew = news;
+        pre = news ? "wn" : "tour";
         SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.CenterScreen;
@@ -98,11 +104,12 @@ class WelcomeForm : Form
             center.Alignment = StringAlignment.Center;
             g.DrawString("Spotify Overlay", f1, white, new RectangleF(0, 204, 200, 24), center);
             g.DrawString("funny.games", f2, grey, new RectangleF(0, 228, 200, 20), center);
+            if (whatsNew) g.DrawString(Lang.T("wn_head", App.Version), f2, green, new RectangleF(0, 256, 200, 20), center);
 
             string n = (page + 1).ToString();
-            g.DrawString(Lang.T("tour" + n + "_t"), f3, white, new RectangleF(236, 60, 380, 80));
-            string tx = Lang.T("tour" + n + "_x");
-            if (page == Pages - 1 && Contact.HasDonate) tx += "\n\n" + Lang.T("donate_tour");
+            g.DrawString(Lang.T(pre + n + "_t"), f3, white, new RectangleF(236, 60, 380, 80));
+            string tx = Lang.T(pre + n + "_x");
+            if (!whatsNew && page == Pages - 1 && Contact.HasDonate) tx += "\n\n" + Lang.T("donate_tour");
             g.DrawString(tx, f4, grey, new RectangleF(236, 150, 380, 140));
 
             for (int i = 0; i < Pages; i++)

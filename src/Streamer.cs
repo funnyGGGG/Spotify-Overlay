@@ -20,6 +20,7 @@ static class Streamer
     static bool playing = false, active = false;
     static double pos = 0, dur = 0;
     static byte[] coverPng = null;
+    static byte[] overlayPng = null;
     static int coverVer = 0;
     static string lastText = null;
     static TcpListener listener = null;
@@ -75,6 +76,23 @@ static class Streamer
                 b.Save(ms, ImageFormat.Png);
                 byte[] data = ms.ToArray();
                 lock (gate) { coverPng = data; coverVer++; }
+            }
+        }
+        catch { }
+    }
+
+    // Das Bild des echten Overlays fuer die OBS-Seite (sieht dadurch genauso aus wie die App)
+    public static void SetOverlay(Bitmap bmp)
+    {
+        if (bmp == null) return;
+        try
+        {
+            using (bmp)
+            using (MemoryStream ms = new MemoryStream())
+            {
+                bmp.Save(ms, ImageFormat.Png);
+                byte[] data = ms.ToArray();
+                lock (gate) { overlayPng = data; }
             }
         }
         catch { }
@@ -151,6 +169,13 @@ static class Streamer
                         data = Encoding.UTF8.GetBytes(StateJson());
                         type = "application/json; charset=utf-8";
                     }
+                    else if (path == "/overlay.png")
+                    {
+                        byte[] op;
+                        lock (gate) { op = overlayPng; }
+                        if (op == null) { data = new byte[0]; type = "text/plain"; status = "404 Not Found"; }
+                        else { data = op; type = "image/png"; }
+                    }
                     else if (path == "/cover.png")
                     {
                         byte[] cp;
@@ -210,44 +235,20 @@ static class Streamer
     // Die Webseite fuer die OBS-Browserquelle. Parameter: ?scale=1.5 (Groesse), &bar=0 (ohne Fortschrittsbalken)
     const string Page = @"<!doctype html><html><head><meta charset='utf-8'><title>Spotify Overlay by funny.games</title>
 <style>
-html,body{margin:0;background:transparent;font-family:'Segoe UI',Arial,sans-serif;color:#fff;overflow:hidden}
-#c{box-sizing:border-box;width:340px;padding:12px 14px 8px;background:#181818;border-radius:14px}
-#r{display:flex;align-items:center}
-#i{width:64px;height:64px;border-radius:10px;object-fit:cover;margin-right:12px;background:#2a2a2a;flex:none}
-#m{min-width:0;flex:1}
-#t{font-size:16px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#a{font-size:13px;color:#a5a5a5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-#s{display:flex;align-items:center;margin-top:6px;font-size:11px;color:#a5a5a5}
-#d{width:8px;height:8px;border-radius:50%;background:#1db954;margin-right:6px}
-#b{margin-top:10px}
-#bar{height:4px;background:#3e3e3e;border-radius:2px}
-#fill{height:4px;background:#e87828;border-radius:2px;width:0}
-#tm{display:flex;justify-content:space-between;font-size:11px;color:#a5a5a5;margin-top:4px}
-#f{text-align:center;font-size:10.5px;color:#7d7d7d;margin-top:8px;letter-spacing:.2px}
+html,body{margin:0;background:transparent;font-family:'Segoe UI',Arial,sans-serif;overflow:hidden}
+#w{display:inline-block}
+#o{display:block;border-radius:3.2% / 14%}
+#f{text-align:center;font-size:11px;color:#8a8a8a;margin-top:6px;letter-spacing:.2px}
 </style></head><body>
-<div id='c'>
-<div id='r'><img id='i'><div id='m'><div id='t'></div><div id='a'></div><div id='s'><span id='d'></span>Spotify</div></div></div>
-<div id='b'><div id='bar'><div id='fill'></div></div><div id='tm'><span id='p'>0:00</span><span id='e'>0:00</span></div></div>
-<div id='f'>Spotify Overlay by funny.games</div>
-</div>
+<div id='w'><img id='o'><div id='f'>Spotify Overlay by funny.games</div></div>
 <script>
-var q=location.search,ver=-1,pos=0,dur=0,play=false,ts=0;
-function $(x){return document.getElementById(x)}
+var q=location.search,busy=false;
 function g(k,d){var m=new RegExp('[?&]'+k+'=([^&]*)').exec(q);return m?decodeURIComponent(m[1]):d}
-var z=parseFloat(g('scale','1'));if(z>0&&z!=1)$('c').style.zoom=z;
-if(g('bar','1')=='0')$('b').style.display='none';
-function fm(s){s=Math.max(0,Math.floor(s));var m=Math.floor(s/60),r=s%60;return m+':'+(r<10?'0':'')+r}
-function draw(){var p=pos+(play?(Date.now()-ts)/1000:0);if(dur>0&&p>dur)p=dur;
-$('fill').style.width=(dur>0?p/dur*100:0)+'%';$('p').textContent=fm(p);$('e').textContent=fm(dur)}
-function tick(){var x=new XMLHttpRequest();x.open('GET','/state?'+Date.now());x.onload=function(){try{
-var s=JSON.parse(x.responseText);pos=s.pos;dur=s.dur;play=s.playing;ts=Date.now();
-if(!s.active){$('t').textContent='Spotify Overlay';$('a').textContent='Waiting for Spotify ...';
-$('i').style.visibility='hidden';$('b').style.visibility='hidden';return}
-$('i').style.visibility='visible';$('b').style.visibility='visible';
-$('t').textContent=s.title;$('a').textContent=s.artist;
-if(s.cover!=ver){ver=s.cover;$('i').src='/cover.png?'+ver}
-draw();
-}catch(e){}};x.send()}
-setInterval(tick,1000);setInterval(draw,250);tick();
+var z=parseFloat(g('scale','1'));if(z>0&&z!=1)document.getElementById('w').style.zoom=z;
+function tick(){if(busy)return;busy=true;var n=new Image();
+n.onload=function(){document.getElementById('o').src=n.src;busy=false};
+n.onerror=function(){busy=false};
+n.src='/overlay.png?'+Date.now()}
+setInterval(tick,150);tick();
 </script></body></html>";
 }

@@ -147,6 +147,33 @@ static class SpotifyAudio
         catch { cache = new List<ISimpleAudioVolume>(); return -1f; }
     }
 
+    // Text fuer den Lautstaerke-Test in den Einstellungen: alle Spotify-Sitzungen mit Wert und Zustand
+    public static string Debug()
+    {
+        try
+        {
+            lock (gate)
+            {
+                List<ISimpleAudioVolume> l = Sessions();
+                if (l.Count == 0) return "no Spotify audio session";
+                ISimpleAudioVolume pick = Pick(l);
+                System.Text.StringBuilder sb = new System.Text.StringBuilder();
+                for (int i = 0; i < l.Count; i++)
+                {
+                    float v;
+                    l[i].GetMasterVolume(out v);
+                    int st = -1;
+                    try { ((IAudioSessionControl2)l[i]).GetState(out st); }
+                    catch { }
+                    if (i > 0) sb.Append(" | ");
+                    sb.Append("#").Append(i + 1).Append(l[i] == pick ? "*" : "").Append(" ").Append((int)Math.Round(v * 100)).Append("% state ").Append(st);
+                }
+                return sb.ToString();
+            }
+        }
+        catch (Exception ex) { return "error: " + ex.Message; }
+    }
+
     // Aktueller Pegel 0..1 (wie laut Spotify gerade spielt), 0 wenn nichts zu messen ist
     public static float Peak()
     {
